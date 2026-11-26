@@ -1,8 +1,12 @@
+# A callable fixture backed by a table `values::T`. The tests use a coefficient
+# matrix, a tuple of row supports, and a tuple of selected source columns.
 struct TestMapLookup{T}
     values::T
 end
 
-# This callback detects paths that fail to pass the documented index type.
+# Accept one-based `BigInt` indices. Two indices return a coefficient. One
+# index returns an iterable of `(column, coefficient)` pairs or an integer
+# source column, with zero marking an empty selection.
 (lookup::TestMapLookup)(indices::BigInt...) = lookup.values[indices...]
 
 @testset "Callable leg map callbacks" begin
@@ -64,6 +68,7 @@ end
         (term, 1) in NF.row_entries(classical.legs[leg], row) for
         (leg, row) in enumerate((8, 3, 2))
     )
+    # Each factor supplies an integer triple of tensor leg dimensions.
     dimensions = ((2, 3, 4), (3, 4, 2), (4, 2, 3))
     reordered = NF.permute_factors(
         Iterators.Stateful(dimensions), Iterators.Stateful((3, 1, 2))

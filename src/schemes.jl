@@ -1,6 +1,12 @@
-"""A finite bilinear matrix multiplication algorithm with three indexed coefficient maps."""
+"""
+A finite bilinear matrix multiplication algorithm with three indexed coefficient maps.
+Index a scheme with integer `(term, leg, coordinate)` values to obtain a scalar
+weight or, for a `ShpilkaScheme`, a deferred `ShpilkaCoefficient`.
+"""
 abstract type BilinearScheme end
 
+# U, V and W retain their container types A, B and C. Each is a one-based
+# coefficient table of size (u², rank), such as a Matrix{Int} or a Nemo matrix.
 struct ExplicitScheme{A,B,C} <: BilinearScheme
     u::Int
     U::A
@@ -8,6 +14,8 @@ struct ExplicitScheme{A,B,C} <: BilinearScheme
     W::C
 end
 
+# matrix can be a Julia matrix, a Nemo matrix, or another object whose size
+# gives an integer (rows, columns) pair, typically Tuple{Int,Int}.
 function _matrix_size(matrix)
     dimensions = size(matrix)
     length(dimensions) == 2 ||
@@ -15,7 +23,11 @@ function _matrix_size(matrix)
     return dimensions
 end
 
-"""Construct a scheme from three column-major tables (block coordinates × terms)."""
+"""
+Construct an `ExplicitScheme` from one-based, scalar-indexable tables `U`, `V`
+and `W`. All three have shape `(u², rank)` with positive integer block side
+`u` and product count `rank`. Rows use column-major block coordinates.
+"""
 function explicit_scheme(U, V, W)
     dimensions = _matrix_size(U)
     dimensions == size(V) == size(W) ||
@@ -31,16 +43,23 @@ end
 """
     BilinearScheme(U, V, W)
 
-Create a scheme from three one-based coefficient tables with `u²` rows and
-one column per product. Each table supplies its two dimensions through
-`size(table)` and its coefficients through `table[row, term]`. The scheme
-retains the supplied tables. Each column describes a left linear form, a
-right linear form and the weights of the product in the output. Coefficients
-may be elements of the same field as the input matrices.
+Create a scheme from three coefficient tables with `u²` rows and one column
+per product. Each table supplies a pair of integer dimensions through
+`size(table)`, one-based axes through `axes(table)`, and scalar coefficients
+through `table[row, term]`. The default one-based axes suffice. Julia
+`AbstractMatrix` values, Nemo matrices, and custom tables can be mixed.
+The resulting `ExplicitScheme` retains all three tables. Matching columns
+of `U` and `V` describe the left and right linear forms. The column of `W`
+gives the output weights. Entries can be integers, rationals, or elements
+of the input matrices' field.
 """
 BilinearScheme(U, V, W) = explicit_scheme(U, V, W)
 
-"""Operations and size bounds for Shpilka's finite construction (§6)."""
+"""
+Operations and integer size bounds for Shpilka's finite construction (§6).
+`operations` is a tuple of three callables in application order. They
+materialize a derivation, compile a witness, and decompose the polynomial seed.
+"""
 struct ShpilkaProgram{Ops<:Tuple}
     steps::BigInt
     log_length::BigInt
@@ -50,7 +69,7 @@ struct ShpilkaProgram{Ops<:Tuple}
     operations::Ops
 end
 
-"""A bilinear scheme represented by Shpilka's derivation and its substitution program."""
+"""A bilinear scheme pairing a `ShpilkaDerivation` with its finite `ShpilkaProgram`."""
 struct ShpilkaScheme{P<:ShpilkaProgram} <: BilinearScheme
     derivation::ShpilkaDerivation
     program::P
@@ -59,9 +78,9 @@ end
 """
     multiplication_scheme(target_exponent=5//2) -> BilinearScheme
 
-Construct Shpilka's exact bilinear algorithm for an integer or exact rational
-upper bound on the matrix multiplication exponent. The target must exceed
-OpenAI's bound of `9//4`.
+Construct a `ShpilkaScheme` for a finite integer or exact rational upper
+bound on the matrix multiplication exponent. `target_exponent` must exceed
+OpenAI's bound of `9//4`. Examples include `3`, `5//2`, and `Nemo.QQ(5//2)`.
 The finite substitution program retains tensor powers and derivation loops
 without expanding their coefficient tables. It can be reused for many inputs.
 
@@ -89,12 +108,13 @@ function multiplication_scheme(target_exponent=5//2)
     return ShpilkaScheme(derivation, program)
 end
 
-# The side is r^(N²) from Lemma 6.7. Even its bit length can exceed all
-# addressable memory. Keep the executable definition, not a floating estimate.
+# A WitnessSide holds the ShpilkaScheme that defines the integer r^(N²) in
+# Lemma 6.7. Even the bit length of that integer can exceed addressable memory.
 struct WitnessSide{S<:ShpilkaScheme}
     scheme::S
 end
 
+# A symbolic scheme has a WitnessSide. An explicit table has an Int block side.
 block_side(s::ShpilkaScheme) = WitnessSide(s)
 block_side(s::ExplicitScheme) = s.u
 
@@ -118,13 +138,16 @@ function Base.show(io::IO, ::MIME"text/plain", s::ShpilkaScheme)
     return print(io, "\n  Base block side ", block_side(s))
 end
 
+# maxside and maxrank are integer upper bounds. Return (block side, product
+# count) if the scheme fits both, or nothing.
 function execution_dimensions(s::ExplicitScheme, maxside, maxrank)
     _, rank = size(s.U)
     return s.u <= maxside && rank <= maxrank ? (s.u, rank) : nothing
 end
 
-# Compare the *exact* count with a materialization limit using a binary
-# exponentiation that never constructs the out-of-budget integer.
+# For a positive integer base and nonnegative integer exponent, return the
+# power as a BigInt if it fits the integer limit. Return nothing as soon as
+# the power would exceed the limit.
 function _bounded_power(base::Integer, exponent::Integer, limit::Integer)
     limit >= 1 || return nothing
     answer, factor, n = big(1), big(base), big(exponent)
@@ -142,6 +165,8 @@ function _bounded_power(base::Integer, exponent::Integer, limit::Integer)
     return answer
 end
 
+# Test the integer bounds maxside and maxrank against the symbolic program.
+# A feasible result is the pair of Int dimensions used by the executor.
 function execution_dimensions(s::ShpilkaScheme, maxside, maxrank)
     # The seed has (2a-1)^(6m) indexed products. Its matrix side also
     # satisfies log2(u) >= 2mq by Theorem 1.2's proof (q >= 16).
@@ -157,14 +182,19 @@ function execution_dimensions(s::ShpilkaScheme, maxside, maxrank)
     return u <= maxside ? (Int(u), Int(rank)) : nothing
 end
 
+# A stored length is an integer or a ScaledPowerOfTwo. Both expand to a BigInt.
 _materialize_length(x::Integer) = big(x)
 _materialize_length(x::ScaledPowerOfTwo) = x.coefficient * big(2)^x.exponent
 
+# term and coordinate are one-based integer column and row indices. The
+# integer leg selects U (1), V (2), or W (3). Each entry is a scalar weight.
 function scheme_coefficient(s::ExplicitScheme, term, leg, coordinate)
     table = (s.U, s.V, s.W)[leg]
     return table[coordinate, term]
 end
 
+# The SeedDecomposition supplies rank-one terms and the CompiledWitness maps
+# its three legs to a matrix multiplication tensor.
 struct LoweredScheme <: BilinearScheme
     seed::SeedDecomposition
     witness::CompiledWitness
@@ -177,14 +207,21 @@ struct LoweredScheme <: BilinearScheme
     end
 end
 
+# A compiled witness stores its exact block side as a BigInt.
 block_side(s::LoweredScheme) = s.witness.side
 
+# maxside and maxrank are integer limits on the block side and seed rank.
 function execution_dimensions(s::LoweredScheme, maxside, maxrank)
     u, r = block_side(s), rank_count(s.seed)
     return u <= maxside && r <= maxrank ? (Int(u), Int(r)) : nothing
 end
 
-"""Contract one target row of an exact restriction with one rank-one seed term."""
+"""
+For a `LoweredScheme`, contract one target row of an exact restriction with a
+rank-one seed term. `term` and `coordinate` are one-based integer indices into
+the seed terms and target rows, respectively. `leg` is an integer in `1:3`.
+The result is an exact scalar, such as a `Rational{BigInt}` or a `PhaseSum`.
+"""
 function scheme_coefficient(s::LoweredScheme, term, leg, coordinate)
     1 <= term <= rank_count(s.seed) || throw(BoundsError(s, term))
     row = s.witness.restriction.legs[leg]
@@ -195,6 +232,8 @@ function scheme_coefficient(s::LoweredScheme, term, leg, coordinate)
     return total
 end
 
+# s supplies a ShpilkaScheme's derivation and program. admissible_order is
+# nothing or a predicate on positive integer Fourier orders. Return a LoweredScheme.
 function lower_scheme(s; admissible_order=nothing)
     build, compile, decompose = s.program.operations
     witness = compile(
@@ -204,7 +243,11 @@ function lower_scheme(s; admissible_order=nothing)
     return LoweredScheme(decompose(a, a, witness.copies; admissible_order), witness)
 end
 
-"""A coefficient of Shpilka's scheme whose restriction and seed contraction are deferred."""
+"""
+A deferred coefficient of a `ShpilkaScheme`. The term and row coordinate are
+one-based `BigInt` indices. The integer leg selects the left input (1), right
+input (2), or output (3).
+"""
 struct ShpilkaCoefficient{S<:ShpilkaScheme}
     scheme::S
     term::BigInt
@@ -224,7 +267,8 @@ function Base.show(io::IO, c::ShpilkaCoefficient)
     )
 end
 
-# For ordinary index queries the proven lower bounds settle membership
+# s is a ShpilkaScheme, leg is an integer in 1:3, and term and coordinate
+# are positive integer indices. The proven lower bounds settle ordinary queries
 # immediately. Only an index with an exceptionally long representation
 # requires evaluating the corresponding exact upper endpoint.
 function _check_shpilka_index(s, term, leg, coordinate)
@@ -242,6 +286,7 @@ function _check_shpilka_index(s, term, leg, coordinate)
     return nothing
 end
 
+# The three one-based integer indices identify a deferred ShpilkaCoefficient.
 function scheme_coefficient(s::ShpilkaScheme, term, leg, coordinate)
     _check_shpilka_index(s, term, leg, coordinate)
     return ShpilkaCoefficient(s, big(term), Int(leg), big(coordinate))
@@ -254,9 +299,10 @@ end
 """
     materialize(coefficient; max_leg_bits)
 
-Evaluate a deferred coefficient by composing the exact restriction in Shpilka's
-construction and contracting the requested row. The budget limits the bit
-length of a source-leg dimension, which can be large even at the default target.
+Evaluate a `ShpilkaCoefficient` by composing the exact restriction in Shpilka's
+construction and contracting the requested row to an exact scalar.
+`max_leg_bits` is a positive integer bound on the bit length of a source-leg
+dimension, which can be large even at the default target.
 """
 function materialize(c::ShpilkaCoefficient; max_leg_bits::Integer)
     s = c.scheme

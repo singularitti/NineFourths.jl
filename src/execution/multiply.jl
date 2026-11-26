@@ -1,3 +1,5 @@
+# Allocate a Matrix{T} of nonnegative integer dimensions m×n. zero_value is
+# an additive identity convertible to T, or nothing for an empty result.
 function _zero_matrix(::Type{T}, m, n, zero_value) where {T}
     C = Matrix{T}(undef, m, n)
     isempty(C) && return C
@@ -6,6 +8,9 @@ function _zero_matrix(::Type{T}, m, n, zero_value) where {T}
     return fill!(C, zero_value)
 end
 
+# A and B are one-based m×k and k×n matrices. The result is a Matrix{T}
+# initialized with the scalar zero_value. The add and product callbacks each
+# take two entries and return a scalar or a FieldPhaseSum work value.
 function _classical_product(A, B, zero_value, T, add=+, product=*)
     C = _zero_matrix(T, size(A, 1), size(B, 2), zero_value)
     for column in axes(B, 2), k in axes(A, 2)
@@ -17,6 +22,10 @@ function _classical_product(A, B, zero_value, T, add=+, product=*)
     return C
 end
 
+# Accumulate an input linear form from the one-based source matrix into a
+# Matrix{Any} of child-block size. The domain is from _field_inputs. The term
+# and leg select an input form (leg 1 or 2), side is the scheme's block-grid side,
+# and the active dimensions count block rows and columns containing entries.
 function _accumulate_form!(
     form, source, scheme, domain, term, leg, side, active_rows, active_columns
 )
@@ -40,6 +49,9 @@ function _accumulate_form!(
     return nothing
 end
 
+# Accumulate a child product Matrix{Any} into the parent output C::Matrix{Any}.
+# The domain is from _field_inputs. The integer term selects an output weight,
+# side is the block-grid side, and the active dimensions count output blocks.
 function _accumulate_product!(
     C, product, scheme, domain, term, side, active_rows, active_columns
 )
@@ -62,6 +74,10 @@ function _accumulate_product!(
     return nothing
 end
 
+# A and B are one-based matrices of field scalars or FieldPhaseSum work values.
+# The domain is from _field_inputs and zero_value is its additive identity.
+# The integers side and rank give the scheme's block-grid side and term count.
+# Child input forms and the returned product use Matrix{Any} for work values.
 function _scheme_product(A, B, scheme, domain, zero_value, side, rank)
     m, k = size(A)
     n = size(B, 2)
@@ -88,8 +104,11 @@ function _scheme_product(A, B, scheme, domain, zero_value, side, rank)
     return C
 end
 
+# Multiply built-in integer or rational scalars after widening the left factor.
 _wide_product(a, b) = big(a) * b
 
+# Use the one-based matrices and scalar zero from _field_inputs. Its legacy
+# flag selects widened integer or rational arithmetic for inferred exact inputs.
 function _classical_fallback(inputs)
     product = inputs.legacy ? _wide_product : (*)
     return _classical_product(
@@ -101,33 +120,39 @@ end
     multiply(A, B, scheme; fallback=:error, field=nothing,
              max_coefficient_visits=10_000_000, max_workspace_entries=10_000_000)
 
-Multiply an `m×k` matrix by a `k×n` matrix and return a dense Julia matrix.
-Each input supplies two dimensions through `size(M)` and scalar entries
-through `M[i, j]`. The row and column indices come from `axes(M)`, which
-defaults to one-based indices for each dimension. The executor uses
-`eltype(M)` and the scalar entries to infer the input field.
+Multiply an `m×k` matrix by a `k×n` matrix and return a dense Julia `Matrix`.
+`A` and `B` can be Julia `AbstractMatrix` values, Nemo matrices, or other
+containers that supply integer dimensions through `size(M)` and scalar entries
+through `M[i, j]`. The size is typically a `Tuple{Int,Int}`. The index ranges
+come from `axes(M)`, which defaults to one-based indices on each axis. The
+executor uses `eltype(M)` and the entries to infer the input field.
 
 The package's constructors return a `BilinearScheme`. A custom scheme can
 implement `NineFourths.execution_dimensions(scheme, max_side, max_rank)`,
 returning a positive integer pair `(side, rank)` within the limits or
 `nothing`. `NineFourths.scheme_coefficient(scheme, term, leg, coordinate)`
-supplies each weight, and `NineFourths.block_side(scheme)` gives the integer
-block side used in diagnostics.
+supplies each scalar weight for one-based integer term and block coordinate
+indices. Legs 1 and 2 denote the input forms and leg 3 denotes the output
+weights. `NineFourths.block_side(scheme)` supplies the block side used in
+diagnostics. Package schemes can represent that side as a symbolic `WitnessSide`.
 
-With an inferred domain, Julia integer inputs produce `Matrix{BigInt}` and
-Julia rational inputs produce `Matrix{Rational{BigInt}}`. Other inputs use
-their common scalar field. Pass `field` to supply a parent, scalar type, or
-representative element when needed.
+With the default `field=nothing`, built-in Julia integer inputs produce
+`Matrix{BigInt}` and their rational counterparts produce `Matrix{Rational{BigInt}}`.
+Other inputs use their common scalar field. To supply the field explicitly,
+pass a parent callable as `field(0)` and `field(1)`, a scalar type with
+identities, or a representative element.
 
 For positive dimensions the default requires at least one bilinear scheme
 layer. The product uses implicit zero padding along each axis and conventional
-multiplication at the leaves. `fallback=:classical` permits a conventional
-product when the requested scheme cannot execute in the input field or budgets.
-A zero dimension determines an empty or zero result directly.
+multiplication at the leaves. The `fallback` keyword accepts either the default
+`:error` or `:classical`, which permits a conventional product when the requested
+scheme cannot execute in the input field or budgets. A zero dimension determines
+an empty or zero result directly.
 
-The visit budget bounds the coefficient visits across the recursive product.
-The workspace budget bounds live dense matrix entries, including normalized
-inputs and the result. The workspace budget also applies to classical fallback.
+Both budgets are nonnegative integers. The visit budget bounds the coefficient
+visits across the recursive product. The workspace budget bounds live dense
+matrix entries, including normalized inputs and the result. The workspace budget
+also applies to classical fallback.
 """
 function multiply(
     A,

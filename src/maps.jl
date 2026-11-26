@@ -1,11 +1,16 @@
 """
 One leg of a tensor restriction. Columns label source variables and rows
-label target variables. Entries and dimensions stay exact.
+label target variables. The constructor takes positive `Integer` dimensions
+`in_dim` and `out_dim` and stores them as `BigInt`.
 
-`entry(row, col)` returns a coefficient. The optional `support(row)` yields
-`(column, coefficient)` pairs whose contributions add up to the row. The
-optional `selection(row)` identifies the sole column with coefficient one,
-or returns zero for an all-zero row. Callbacks receive `BigInt` indices.
+Each callback can be a function or another callable object. It receives
+one-based `BigInt` indices. `entry(row, col)` returns an exact coefficient,
+for example an `Int`, `Rational{BigInt}`, or `PhaseSum`.
+`support(row)` yields an iterable of `(column, weight)` pairs with integer
+columns and exact weights. Their contributions add up to the row.
+`selection(row)` returns the `Integer` index of the only nonzero column when
+its coefficient is one, or zero for an all-zero row. Either optional callback
+can be `nothing`.
 """
 struct LegMap
     in_dim::BigInt
@@ -28,7 +33,11 @@ function Base.getindex(m::LegMap, row::Integer, col::Integer)
     return m.entry(big(row), big(col))
 end
 
-"""Iterate the `(column, coefficient)` contributions to a one-based row of a leg map."""
+"""
+Iterate the `(column, weight)` contributions to a one-based `Integer` row.
+`m` supplies `in_dim`, `out_dim`, `entry`, and `support` as in a `LegMap`.
+When `support` is `nothing`, scan the columns and yield the nonzero entries.
+"""
 function row_entries(m, row::Integer)
     1 <= row <= m.out_dim || throw(BoundsError(m, row))
     row_index = big(row)
@@ -39,8 +48,13 @@ function row_entries(m, row::Integer)
     )
 end
 
-"""A row selects one source variable with coefficient one, or zero if its index is zero."""
+"""
+Construct a `LegMap` from positive `Integer` dimensions. The callable
+`source_column` maps a `BigInt` row to a one-based `Integer` column, or to zero
+for an all-zero row. A selected column has coefficient `1::Int`.
+"""
 function selection_map(in_dim, out_dim, source_column)
+    # Given a BigInt row, return an empty tuple or one (column, 1) contribution.
     function entries(row)
         col = source_column(row)
         return iszero(col) ? () : ((col, 1),)
@@ -54,31 +68,46 @@ function selection_map(in_dim, out_dim, source_column)
     )
 end
 
+# Three LegMaps in tensor order, one each for the left input, right input, and output.
 struct TensorRestriction
     legs::NTuple{3,LegMap}
 end
 
 TensorRestriction(x::LegMap, y::LegMap, z::LegMap) = TensorRestriction((x, y, z))
+
+# A TensorRestriction's legs form an NTuple{3,LegMap} of maps with BigInt input dimensions.
 source_dims(restriction) = map(m -> m.in_dim, restriction.legs)
+# Read the BigInt output dimensions from the same three LegMap objects.
 target_dims(restriction) = map(m -> m.out_dim, restriction.legs)
+
+# The tensor has three equal BigInt leg dimensions. For a matrix tensor,
+# the dimension of each leg is the square of the integer matrix side `k`.
 unit_dims(k::Integer) = (big(k), big(k), big(k))
 mm_dims(k::Integer) = unit_dims(big(k)^2)
 
+# `dims` supports indexing over the three positive integer leg dimensions,
+# for example an `NTuple{3,BigInt}`.
 function identity_restriction(dims)
     return TensorRestriction(ntuple(i -> selection_map(dims[i], dims[i], identity), 3))
 end
 
-"""Apply `a` first and `b` second, matching the intervening leg dimensions."""
+"""
+Apply `a` first and `b` second, matching the intervening leg dimensions.
+The operands are usually `LegMap`s. They expose `in_dim`, `out_dim`, and
+`selection`, and a general composition uses `row_entries` and indexes `a`.
+"""
 function _compose_maps(a, b)
     a.out_dim == b.in_dim ||
         throw(DimensionMismatch("tensor restriction endpoints do not match"))
     if !isnothing(a.selection) && !isnothing(b.selection)
+        # Map a BigInt target row through two selectors returning integer columns.
         function source_col(row)
             mid = b.selection(row)
             return iszero(mid) ? 0 : a.selection(big(mid))
         end
         return selection_map(a.in_dim, b.out_dim, source_col)
     end
+    # For two BigInt indices, accumulate products of exact coefficients.
     function entry(row, col)
         value = 0
         for (mid, weight) in row_entries(b, row)
@@ -87,6 +116,7 @@ function _compose_maps(a, b)
         end
         return value
     end
+    # A BigInt row yields (integer column, exact weight) contributions.
     # Contributions at the same source index may occur several times.
     # Downstream contractions add them, including exact cancellations.
     function entries(row)
@@ -98,6 +128,7 @@ function _compose_maps(a, b)
     return LegMap(a.in_dim, b.out_dim, entry, entries)
 end
 
+# Compose the three corresponding legs of each TensorRestriction left to right.
 compose_restrictions(r::TensorRestriction) = r
 
 function compose_restrictions(
@@ -107,10 +138,15 @@ function compose_restrictions(
     return isempty(rest) ? composed : foldl(compose_restrictions, rest; init=composed)
 end
 
-"""Tensor two leg maps with the coordinates of the first factor varying fastest."""
+"""
+Tensor two leg maps with the coordinates of the first factor varying fastest.
+The operands are usually `LegMap`s. They expose `in_dim`, `out_dim`, and
+`selection`, and a general product uses `row_entries` and indexed coefficients.
+"""
 function _product_maps(a, b)
     src, dst = a.in_dim * b.in_dim, a.out_dim * b.out_dim
     if !isnothing(a.selection) && !isnothing(b.selection)
+        # Split a BigInt product row into factor rows and pack the integer source columns.
         function source_col(row)
             hi, lo = divrem(row - 1, a.out_dim)
             x, y = a.selection(lo + 1), b.selection(hi + 1)
@@ -118,12 +154,14 @@ function _product_maps(a, b)
         end
         return selection_map(src, dst, source_col)
     end
+    # BigInt row and column indices select one exact coefficient from each factor.
     function entry(row, col)
         j, i = divrem(row - 1, a.out_dim)
         l, k = divrem(col - 1, a.in_dim)
         v = a[i + 1, k + 1]
         return iszero(v) ? v : v * b[j + 1, l + 1]
     end
+    # For a BigInt product row, yield (packed column, exact weight) pairs.
     function entries(row)
         j, i = divrem(row - 1, a.out_dim)
         return (
@@ -134,6 +172,7 @@ function _product_maps(a, b)
     return LegMap(src, dst, entry, entries)
 end
 
+# Take the tensor product leg by leg. Zero factors give the dimension-one identity.
 product_restriction() = identity_restriction(unit_dims(1))
 product_restriction(r::TensorRestriction) = r
 
@@ -144,6 +183,7 @@ function product_restriction(
     return isempty(rest) ? ab : foldl(product_restriction, rest; init=ab)
 end
 
+# Use `n` copies of the restriction as tensor factors, with `n` nonnegative.
 function power_restriction(r::TensorRestriction, n::Integer)
     n >= 0 || throw(DomainError(n, "tensor power must be nonnegative"))
     n == 0 && return product_restriction()
@@ -153,7 +193,11 @@ function power_restriction(r::TensorRestriction, n::Integer)
     return iseven(n) ? square : product_restriction(square, r)
 end
 
-"""Permute an iterable of leg-dimension triples in first-factor-fastest coordinates."""
+"""
+Permute factors in first-factor-fastest coordinates. `dimensions` is an iterable
+of positive integer leg-dimension triples, such as a `Vector{NTuple{3,BigInt}}`.
+`order` is an iterable of one-based integer factor indices, such as `(3, 1, 2)`.
+"""
 function permute_factors(dimensions, order)
     dimensions = collect(dimensions)
     order = collect(order)
@@ -167,6 +211,7 @@ function permute_factors(dimensions, order)
             push!(strides, total)
             total *= d
         end
+        # Decode a BigInt row in the new factor order and return its original BigInt column.
         function source_col(row)
             index, col = row - 1, big(1)
             for i in order
@@ -180,10 +225,13 @@ function permute_factors(dimensions, order)
     return TensorRestriction(legs)
 end
 
+# `sides` is an iterable of positive Integer matrix sides, such as `(2, 3)`.
+# The target matrix side is their product.
 function mm_product(sides)
     ns = big.(collect(sides))
     all(>(0), ns) || throw(ArgumentError("matrix dimensions must be positive"))
     side = prod(ns; init=big(1))
+    # Map a BigInt matrix entry index to a BigInt column packed by factor.
     function source_col(row)
         y, x = divrem(row - 1, side)
         col, stride = big(1), big(1)
@@ -199,11 +247,14 @@ function mm_product(sides)
     return TensorRestriction(leg, leg, leg)
 end
 
+# `sides` is an iterable of positive Integer factor sides. Their product gives
+# the side of the leading square cut from the source matrix.
 function mm_split(source_side::Integer, sides)
     ns = big.(collect(sides))
     all(>(0), ns) || throw(ArgumentError("matrix dimensions must be positive"))
     side = prod(ns; init=big(1))
     side <= source_side || throw(DimensionMismatch("matrix product does not fit in source"))
+    # Decode a BigInt row packed by factor into a BigInt source matrix entry index.
     function source_col(row)
         packed, x, y, stride = row - 1, big(0), big(0), big(1)
         for n in ns
@@ -219,17 +270,24 @@ function mm_split(source_side::Integer, sides)
     return TensorRestriction(leg, leg, leg)
 end
 
+# Keep the first `t` coordinates on each leg of a unit tensor of dimension `k`.
 function unit_trim(k::Integer, t::Integer)
     1 <= t <= k || throw(DimensionMismatch("unit tensor cannot supply requested dimension"))
     leg = selection_map(k, t, identity)
     return TensorRestriction(leg, leg, leg)
 end
 
-"""Classical rank decomposition of a catalyst matrix tensor, with (i,k,j) digits."""
+"""
+Construct the classical rank decomposition of a catalyst matrix tensor with
+positive `Integer` side `n`. Each leg has `n^3` source columns encoding `(i,k,j)`
+and `n^2` target rows encoding its pair of matrix indices.
+"""
 function unit_to_mm(n::Integer)
     n > 0 || throw(DomainError(n))
     b = big(n)
+    # `leg` is an Int from 1 through 3, for X, Y, and Z respectively.
     function leg_map(leg)
+        # For a BigInt row, yield pairs of a BigInt source column and coefficient 1::Int.
         function entries(row)
             y, x = divrem(row - 1, b)
             if leg == 1
@@ -239,6 +297,7 @@ function unit_to_mm(n::Integer)
             end
             return ((1 + x + b * k + b^2 * y, 1) for k in 0:(b - 1))
         end
+        # BigInt row and column indices determine a coefficient of 0::Int or 1::Int.
         function entry(row, col)
             kj, i = divrem(col - 1, b)
             j, k = divrem(kj, b)
@@ -256,7 +315,11 @@ function unit_to_mm(n::Integer)
     return TensorRestriction(ntuple(leg_map, 3))
 end
 
-"""Discard a factor known to have coefficient one at coordinate (1,1,1)."""
+"""
+Discard a factor known to have coefficient one at coordinate `(1,1,1)`.
+`dims` supplies its three positive integer leg dimensions by indexing,
+for example as an `NTuple{3,BigInt}`.
+"""
 function discard_restriction(dims)
     return TensorRestriction(ntuple(i -> selection_map(dims[i], 1, _ -> 1), 3))
 end

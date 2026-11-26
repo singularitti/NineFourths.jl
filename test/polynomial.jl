@@ -50,6 +50,8 @@ end
         NineFourths.root_of_unity(large_length, -1) / large_length
 end
 
+# `a` and `b` are integer polynomial lengths. `coordinates` is a triple of
+# one-based integer leg indices. Return the seed tensor coefficient `0` or `1`.
 function seed_tensor_entry(a, b, coordinates)
     dimensions = (a, b, a + b - 1)
     remaining = coordinates .- 1
@@ -94,6 +96,7 @@ end
         baseline = NineFourths.seed_baseline(a, b)
         @test NineFourths.source_dims(baseline) == NineFourths.seed_dims(a, b)
         @test NineFourths.target_dims(baseline) == (16, 16, 16)
+        # One vector of selected source columns per leg, in target row order.
         selected = ntuple(3) do leg
             [first(only(NineFourths.row_entries(baseline.legs[leg], row))) for row in 1:16]
         end

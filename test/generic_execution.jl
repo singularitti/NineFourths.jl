@@ -1,10 +1,12 @@
 # These scalars have only a value-level field interface. In particular, they
 # lack zero(T), one(T), conversion to Julia numbers, and array multiplication.
+# The constructor accepts any `Rational` and stores it as `Rational{BigInt}`.
 struct TestValueRational
     value::Rational{BigInt}
     TestValueRational(value::Rational) = new(value)
 end
 
+# Build a `TestValueRational` from integer numerator and denominator values.
 test_value_q(n::Integer, d::Integer=1) = TestValueRational(big(n) // big(d))
 Base.zero(::TestValueRational) = test_value_q(0)
 Base.one(::TestValueRational) = test_value_q(1)
@@ -16,15 +18,18 @@ Base.:-(x::TestValueRational, y::TestValueRational) = TestValueRational(x.value 
 Base.:*(x::TestValueRational, y::TestValueRational) = TestValueRational(x.value * y.value)
 Base.:(==)(x::TestValueRational, y::TestValueRational) = x.value == y.value
 
+# A callable prime field fixture. `modulus::Int` is prime.
 struct TestPrimeParent
     modulus::Int
 end
 
+# A field element with an `Int` representative in `0:(field.modulus - 1)`.
 struct TestValueResidue
     field::TestPrimeParent
     value::Int
 end
 
+# Coerce an integer to a `TestValueResidue` belonging to `F`.
 (F::TestPrimeParent)(n::Integer) = TestValueResidue(F, Int(mod(n, F.modulus)))
 Base.zero(F::TestPrimeParent) = F(0)
 Base.one(F::TestPrimeParent) = F(1)
@@ -34,6 +39,9 @@ Base.iszero(x::TestValueResidue) = iszero(x.value)
 Base.inv(x::TestValueResidue) = x.field(invmod(x.value, x.field.modulus))
 Base.:-(x::TestValueResidue) = x.field(-x.value)
 
+# `op` maps two `Int` representatives to an integer, as `+`, `-`, or `*` does.
+# `x` and `y` are `TestValueResidue` elements of the same parent. Return a
+# residue of that parent.
 function test_residue_binary(op, x, y)
     x.field == y.field || throw(ArgumentError("incompatible residue parents"))
     return x.field(op(x.value, y.value))
@@ -47,6 +55,8 @@ function Base.:(==)(x::TestValueResidue, y::TestValueResidue)
     return x.field == y.field && x.value == y.value
 end
 
+# A modulo-five scalar whose `Integer` subtype tests field inference.
+# Its constructor accepts an `Integer` and stores the reduced `Int` value.
 struct TestIntegerResidue <: Integer
     value::Int
     TestIntegerResidue(value::Integer) = new(mod(value, 5))
@@ -73,6 +83,8 @@ end
 
 Base.:(==)(x::TestIntegerResidue, y::TestIntegerResidue) = x.value == y.value
 
+# A modulo-five scalar with an `Int` representative. Tests pass a callable
+# that maps `Integer` inputs to this type to supply field identities.
 struct TestCallableScalar
     value::Int
     TestCallableScalar(value::Integer) = new(mod(value, 5))
@@ -95,13 +107,19 @@ end
 
 Base.:(==)(x::TestCallableScalar, y::TestCallableScalar) = x.value == y.value
 
+# `A` and `B` are one-based matrix-like inputs of size `m×k` and `k×n` over
+# the same field. `additive_identity` is a zero element of that field.
+# Return the `m×n` Julia `Matrix` of scalar dot products.
 function field_product_reference(A, B, additive_identity)
     m, k = size(A)
     n = last(size(B))
+    # Integer output indices `(i, j)` select one scalar dot product.
     dot_entry(i, j) = foldl(+, (A[i, h] * B[h, j] for h in 1:k); init=additive_identity)
     return [dot_entry(i, j) for i in 1:m, j in 1:n]
 end
 
+# Return an `ExplicitScheme` with three 4×7 coefficient tables. The `Bool`
+# `scaled` selects rational rescaling of the left and output weights.
 function generic_strassen(; scaled=false)
     U = [1 0 1 0 1 -1 0; 0 1 0 0 0 1 0; 0 0 0 0 1 0 1; 1 1 0 1 0 0 -1]
     V = [1 1 0 -1 0 1 0; 0 0 0 1 0 0 1; 0 0 1 0 0 1 0; 1 0 -1 0 1 0 1]
@@ -120,6 +138,8 @@ end
     witness = NineFourths.compile_witness(nodes, 1)
     scheme = NineFourths.LoweredScheme(NineFourths.seed_decomposition(1, 2), witness)
     extension, generator = Nemo.finite_field(2, 2, :u)
+    # Each case holds a Nemo field parent, an integer or extension generator
+    # for the input entries, and the integer product dimensions `(m, k, n)`.
     cases = (
         (Nemo.GF(2), 0, (3, 5, 2)),
         (Nemo.GF(3), 0, (5, 2, 3)),
@@ -205,6 +225,7 @@ end
     # A degree-six stage cannot average seven evaluations in characteristic
     # seven. Eight evaluations still recover its constant coefficient.
     F7 = Nemo.GF(7)
+    # `Integer -> Bool` predicate for orders invertible in the test field.
     admissible_order = order -> !iszero(F7(order))
     interpolated = NineFourths._interpolated_phase(single, 1, 1; admissible_order)
     @test interpolated.points == 8
@@ -264,6 +285,7 @@ end
     scheme = generic_strassen()
     F = Nemo.GF(5)
     other = Nemo.GF(3)
+    # `Matrix{Any}` makes field inference inspect the entries of the matrix.
     A = Any[F(1) F(2) F(0); F(4) F(3) F(1)]
     B = F.([1 1; 2 4; 3 0])
     C = multiply(A, B, scheme)
@@ -328,6 +350,7 @@ end
     scheme = generic_strassen(; scaled=true)
     residue = TestIntegerResidue(Int16(7))
     @test TestIntegerResidue(residue) === residue
+    # Each variant holds a scalar type and a named tuple of execution keywords.
     variants = (
         (TestIntegerResidue, (;)),
         (TestCallableScalar, (; field=n -> TestCallableScalar(n))),

@@ -21,6 +21,7 @@
     @test large.length_bound.coefficient == 4 * large.q
     @test large.length_bound.exponent == large.q
 
+    # Mixed integer inputs exercise both `BigInt` and `ScaledPowerOfTwo` storage.
     expanded = NineFourths._scaled_power_of_two(Int8(3), UInt16(200))
     @test expanded isa BigInt
     @test expanded == big(3) << 200

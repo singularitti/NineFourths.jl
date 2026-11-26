@@ -118,6 +118,8 @@ end
     @test report.identity === :failed
     @test occursin("executable construction", only(report.diagnostics))
 
+    # Given integer lengths and tensor power, return a `SeedDecomposition`
+    # with one fewer copy to exercise verification of the executable program.
     altered_seed = (a, b, m) -> NineFourths.seed_decomposition(a, b, m - 1)
     altered_program = NineFourths.ShpilkaProgram(
         program.steps,

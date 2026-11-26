@@ -1,4 +1,4 @@
-# Each permutation maps a leg in Q to its original leg in C(a,b).
+# Six NTuple{3,Int} permutations map legs in Q to legs in C(a,b).
 const LEG_PERMUTATIONS = ((1, 2, 3), (3, 1, 2), (2, 3, 1), (2, 1, 3), (3, 2, 1), (1, 3, 2))
 
 struct PolynomialDecomposition
@@ -6,12 +6,16 @@ struct PolynomialDecomposition
     order::BigInt
 end
 
+# For positive integer input lengths a and b, return the three leg sizes
+# as an NTuple{3,BigInt}.
 function polynomial_dims(a::Integer, b::Integer)
     a > 0 && b > 0 || throw(ArgumentError("polynomial input lengths must be positive"))
     first, second = BigInt(a), BigInt(b)
     return (first, second, first + second - 1)
 end
 
+# preferred and alternate are positive BigInt orders. admissible_order is
+# nothing or a callable returning Bool for a candidate order.
 function _sample_order(admissible_order, preferred, alternate)
     isnothing(admissible_order) && return preferred
     admissible_order(preferred) && return preferred
@@ -22,10 +26,11 @@ function _sample_order(admissible_order, preferred, alternate)
 end
 
 """
-Theorem 3.1 using roots of unity for evaluation and interpolation with
-positive integer input lengths `a` and `b`. The optional `admissible_order`
-predicate chooses an invertible order from `a+b-1` and `a+b`. Both orders
-exceed the degree of the product.
+Return a `PolynomialDecomposition` by evaluating and interpolating at roots
+of unity, as in Theorem 3.1. The input lengths `a` and `b` are positive
+integers. Supply `nothing` or an `admissible_order(order)` callable returning
+`Bool` for a `BigInt` order. It selects an invertible order from `a+b-1` and
+`a+b`. Both orders exceed the degree of the product.
 """
 function polynomial_decomposition(a, b; admissible_order=nothing)
     dimensions = polynomial_dims(a, b)
@@ -35,8 +40,12 @@ function polynomial_decomposition(a, b; admissible_order=nothing)
 end
 
 Base.size(decomposition::PolynomialDecomposition) = decomposition.dimensions
+
+# The polynomial rank is the BigInt Fourier order.
 rank_count(decomposition::PolynomialDecomposition) = decomposition.order
 
+# Return a Rational{BigInt} or PhaseSum for the one-based integer term, leg
+# and coordinate in a PolynomialDecomposition.
 function rank_coefficient(
     decomposition::PolynomialDecomposition, term::Integer, leg::Integer, coordinate::Integer
 )
@@ -58,15 +67,18 @@ struct SeedDecomposition
     terms::BigInt
 end
 
+# For positive integer polynomial lengths a and b, return the balanced seed's
+# leg dimensions as an NTuple{3,BigInt}.
 function seed_dims(a, b)
     dimension = prod(polynomial_dims(a, b))^2
     return (dimension, dimension, dimension)
 end
 
 """
-Rank decomposition of `Q(a,b)⊗m` for positive integer lengths `a` and `b`
-and a nonnegative integer number of copies `m`. The first tensor factor
-varies fastest.
+Return a `SeedDecomposition` of `Q(a,b)⊗m` for positive integer lengths `a`
+and `b` and a nonnegative integer number of copies `m`. The first tensor
+factor varies fastest. `admissible_order` is `nothing` or a callable mapping
+a `BigInt` order to `Bool`, as in `polynomial_decomposition`.
 """
 function seed_decomposition(a, b, m::Integer=1; admissible_order=nothing)
     m >= 0 || throw(ArgumentError("the number of seed copies must be nonnegative"))
@@ -86,8 +98,11 @@ function Base.size(
     return size(decomposition)[leg]
 end
 
+# The seed rank is the BigInt count of terms in the tensor power.
 rank_count(decomposition::SeedDecomposition) = decomposition.terms
 
+# Use a decomposition supporting rank_count and a three-leg size tuple.
+# term, leg and coordinate are one-based integers.
 function check_rank_coordinate(decomposition, term, leg, coordinate)
     1 <= leg <= 3 || throw(BoundsError(1:3, leg))
     1 <= term <= rank_count(decomposition) || throw(BoundsError(decomposition, term))
@@ -96,6 +111,8 @@ function check_rank_coordinate(decomposition, term, leg, coordinate)
     return nothing
 end
 
+# Return a Rational{BigInt} or PhaseSum for the one-based integer term, leg
+# and coordinate in a SeedDecomposition.
 function rank_coefficient(
     decomposition::SeedDecomposition, term::Integer, leg::Integer, coordinate::Integer
 )
@@ -120,6 +137,10 @@ end
 # The shorter input is fixed to its constant term in each copy of C(a,b).
 # Each dot product then shares one digit of the matrix row, inner or column
 # index, depending on the leg containing its scalar.
+# dimensions is an NTuple{3,BigInt}. scalar_leg and leg are one-based integer
+# leg indices. matrix_size, digit_base and the one-based coordinate are integers.
+# Each permutation contains scalar_leg exactly once, so missing_leg is its Int
+# position in 1:3. The resulting source coordinate is a BigInt.
 function baseline_source_coordinate(
     dimensions, scalar_leg, leg, matrix_size, digit_base, coordinate
 )
@@ -147,6 +168,9 @@ function baseline_source_coordinate(
     return source + 1
 end
 
+# a and b are positive integer lengths. target_dimensions is an NTuple{3,BigInt}.
+# matrix_coordinate maps a BigInt target row to a one-based integer matrix
+# coordinate for each leg of the resulting TensorRestriction.
 function seed_matrix_selection(a, b, target_dimensions, matrix_coordinate)
     dimensions = polynomial_dims(a, b)
     source_dimensions = seed_dims(a, b)
@@ -154,6 +178,7 @@ function seed_matrix_selection(a, b, target_dimensions, matrix_coordinate)
     digit_base = BigInt(max(a, b))
     matrix_size = digit_base^2
     legs = ntuple(3) do leg
+        # A BigInt target row maps to one BigInt source column for this leg.
         source_column = function (row)
             return baseline_source_coordinate(
                 dimensions,
@@ -169,12 +194,18 @@ function seed_matrix_selection(a, b, target_dimensions, matrix_coordinate)
     return TensorRestriction(legs...)
 end
 
-"""Restrict `Q(a,b)` to `M_max(a,b)^2` using Lemmas 3.4 and 3.8."""
+"""
+Construct a `TensorRestriction` from `Q(a,b)` to `M_max(a,b)^2` using
+Lemmas 3.4 and 3.8. The lengths `a` and `b` are positive integers.
+"""
 function seed_baseline(a::Integer, b::Integer)
     return seed_matrix_selection(a, b, mm_dims(BigInt(max(a, b))^2), identity)
 end
 
-"""Restrict `Q(a,b)` to `I₂` for any `(a,b) ≠ (1,1)`."""
+"""
+Construct a `TensorRestriction` from `Q(a,b)` to `I₂` for positive integer
+lengths `a` and `b` with `(a,b) ≠ (1,1)`.
+"""
 function seed_unit(a::Integer, b::Integer)
     matrix_size = BigInt(max(a, b))^2
     matrix_size >= 2 || throw(ArgumentError("a seed of size (1,1) cannot restrict to I₂"))

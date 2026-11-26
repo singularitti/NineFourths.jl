@@ -8,6 +8,11 @@ struct _WitnessEvent
     side::BigInt
 end
 
+# `nodes` is a one-based indexed sequence of `DerivationNode`s in dependency
+# order, and `N` is a positive integer. `demand` stores the `BigInt` copy count
+# per node. Return a named tuple with `events::Vector{_WitnessEvent}` in reverse
+# derivation order, `baseline::Vector{Tuple{Int,BigInt}}` of (index, copies)
+# pairs, and `side::BigInt` before the final power.
 function _witness_events(nodes, N)
     N >= 1 || throw(ArgumentError("the witness power must be positive"))
     isempty(nodes) && throw(ArgumentError("a witness needs a derivation"))
@@ -67,22 +72,31 @@ end
 Calculate the matrix side in Lemma 6.2 without instantiating restriction maps.
 This evaluates the binomial and multinomial multiplicities and the final power.
 Supply a one-based indexed sequence of derivation entries in dependency order
-and a positive integer power `N`.
+and a positive integer power `N`. The entries are `DerivationNode`s and the
+result is a `BigInt` matrix side after raising the planned side to `N^2`.
 """
 witness_side(nodes, N::Integer) = _witness_events(nodes, N).side^(big(N)^2)
 
 # Preparation costs 16SN². Each reuse costs N² seeds plus at most 18SN
 # seeds: 6N for the unit credit and at most 6N for each interpolation phase
 # per derivation step. The latter follows from 6N*9^N + 2 ≤ 64^N.
+# The integer step bound `S` and power `N` give a `BigInt` seed-copy count.
 _witness_copies(S, N) = big(N)^3 + 34big(S) * big(N)^2
 
 const _WitnessTag = Tuple{Symbol,Int}
 const _WitnessDims = NTuple{3,BigInt}
 const _WitnessWire = Pair{_WitnessTag,_WitnessDims}
 
+# Pair a `(Symbol, Int)` factor tag with three integer leg dimensions,
+# converting the dimensions to `BigInt` in the resulting `_WitnessWire`.
 _wire(tag, dims) = _WitnessWire(tag, map(big, dims))
+
+# For a tuple of three integer leg dimensions, raising each to integer power
+# `n` gives a `_WitnessDims` tuple of three `BigInt`s.
 _power_dims(dims, n) = map(dimension -> big(dimension)^n, dims)
 
+# `wires` is a sequence of `_WitnessWire`s. Return their per-leg products as
+# `_WitnessDims`, using `(big(1), big(1), big(1))` for the empty product.
 function _wire_dims(wires)
     return ntuple(leg -> prod((wire.second[leg] for wire in wires); init=big(1)), 3)
 end
@@ -94,10 +108,14 @@ struct _WitnessLayout
     stages::Vector{TensorRestriction}
 end
 
+# Start a layout with `wires::Vector{_WitnessWire}` and no restriction stages.
 _WitnessLayout(wires) = _WitnessLayout(wires, TensorRestriction[])
 
 # Keep the restriction and its row iterator logarithmic in the number of
 # stages. The leaves still appear in their original application order.
+# `maps` is an indexed sequence of `TensorRestriction`s. The integer bounds
+# `start` and `stop` select a nonempty range. The callable `combine(a, b)`
+# takes two restrictions and returns their combined `TensorRestriction`.
 function _combine_restrictions(combine, maps, start=firstindex(maps), stop=lastindex(maps))
     start == stop && return maps[start]
     middle = start + (stop - start) ÷ 2
@@ -107,12 +125,16 @@ function _combine_restrictions(combine, maps, start=firstindex(maps), stop=lasti
     )
 end
 
+# Find a `_WitnessTag` in a `_WitnessLayout` and return its one-based `Int` index.
 function _wire_position(layout, tag)
     index = findfirst(wire -> wire.first == tag, layout.wires)
     isnothing(index) && error("missing tensor factor $(tag)")
     return index
 end
 
+# `layout` is a `_WitnessLayout`, `tags` is a sequence of input `_WitnessTag`s,
+# and `outputs` is a sequence of replacement `_WitnessWire`s. The
+# `TensorRestriction` maps the selected factors to the output factors.
 function _replace_wires!(layout, tags, outputs, restriction)
     selected = [_wire_position(layout, tag) for tag in tags]
     untouched = setdiff(eachindex(layout.wires), selected)
@@ -135,6 +157,7 @@ function _replace_wires!(layout, tags, outputs, restriction)
     return nothing
 end
 
+# Reorder a `_WitnessLayout` using `tags`, a sequence of `_WitnessTag`s.
 function _order_wires!(layout, tags)
     order = [_wire_position(layout, tag) for tag in tags]
     length(order) == length(layout.wires) || error("incomplete tensor layout")
@@ -145,6 +168,7 @@ function _order_wires!(layout, tags)
     return nothing
 end
 
+# Discard factors from a `_WitnessLayout` by their sequence of `_WitnessTag`s.
 function _drop_wires!(layout, tags)
     isempty(tags) && return nothing
     wires = [layout.wires[_wire_position(layout, tag)] for tag in tags]
@@ -152,6 +176,9 @@ function _drop_wires!(layout, tags)
     return nothing
 end
 
+# Decode a one-based integer `index` into a `Vector{BigInt}` of one-based
+# coordinates. The positive integer `dimensions` give the radices in order,
+# with the first coordinate varying fastest.
 function _coordinates(index, dimensions)
     coordinates = BigInt[]
     quotient = big(index) - 1
@@ -162,6 +189,8 @@ function _coordinates(index, dimensions)
     return coordinates
 end
 
+# Pack a sequence of one-based integer `coordinates` into a one-based
+# `BigInt` index using the matching integer `dimensions`, first coordinate fastest.
 function _coordinate(coordinates, dimensions)
     index, stride = big(1), big(1)
     for (digit, dimension) in zip(coordinates, dimensions)
@@ -171,6 +200,9 @@ function _coordinate(coordinates, dimensions)
     return index
 end
 
+# The positive integer lengths `(a, b)` and `(c, d)` define the source and
+# target seeds of the returned `TensorRestriction`. Each selection map
+# converts a `BigInt` target row to a `BigInt` source column using six radices.
 function _seed_restrict(a, b, c, d)
     src, dst = (a, b, a + b - 1), (c, d, c + d - 1)
     return TensorRestriction(
@@ -184,6 +216,9 @@ function _seed_restrict(a, b, c, d)
     )
 end
 
+# `a` and `b` are positive integer polynomial lengths. The `TensorRestriction`
+# swaps them by permuting the six orientations. Each selection map converts
+# a `BigInt` target row to a `BigInt` source column.
 function _seed_symmetry(a, b)
     src = (a, b, a + b - 1)
     order = map(LEG_PERMUTATIONS) do p
@@ -204,6 +239,10 @@ end
 
 # Change from (U^N)⊗(V^N)⊗⋯ to (U⊗V⊗⋯)^N, or the inverse. The
 # radix for each wire is determined independently on each tensor leg.
+# `factors` can be traversed for each leg and has a length. Each element
+# supplies three integer dimensions indexed by leg.
+# `N` is the integer replica count and `inverse` is a `Bool`. Return a
+# `TensorRestriction` with powered dimensions on both ends.
 function _replica_order(factors, N; inverse=false)
     dimensions = ntuple(leg -> prod((dims[leg] for dims in factors); init=big(1)), 3)
     powered = _power_dims(dimensions, N)
@@ -212,6 +251,7 @@ function _replica_order(factors, N; inverse=false)
         ntuple(3) do leg
             radices = [dims[leg] for dims in factors]
             wire_radices = [d^N for d in radices]
+            # Map one-based `BigInt` indices from wire order to replica order.
             function replica_major(index)
                 remaining = _coordinates(index, wire_radices) .- 1
                 result, stride = big(1), big(1)
@@ -222,6 +262,7 @@ function _replica_order(factors, N; inverse=false)
                 end
                 return result
             end
+            # Map one-based `BigInt` indices from replica order to wire order.
             function wire_major(index)
                 remaining = big(index) - 1
                 coordinates = ones(BigInt, length(radices))
@@ -242,12 +283,15 @@ end
 
 # A matrix side power uses one packed row/column pair, whereas a tensor power
 # uses interleaved pairs, one for each copy.
+# `side` and `N` are positive integers converted to `BigInt`, and `inverse`
+# is a `Bool`. Return a `TensorRestriction` with leg dimension `side^(2N)`.
 function _matrix_power(side, N; inverse=false)
     side, N = big(side), big(N)
     packed_side = side^N
     dimension = packed_side^2
     radix = side^2
     (side == 1 || N == 1) && return identity_restriction((dimension, dimension, dimension))
+    # Map a one-based interleaved `BigInt` index to a packed `BigInt` index.
     function packed(index)
         remaining = big(index) - 1
         first, second, stride = big(0), big(0), big(1)
@@ -260,6 +304,7 @@ function _matrix_power(side, N; inverse=false)
         end
         return first + second * stride + 1
     end
+    # Map a one-based packed `BigInt` index to an interleaved `BigInt` index.
     function interleaved(index)
         high, low = divrem(big(index) - 1, packed_side)
         result, stride = big(1), big(1)
@@ -275,8 +320,12 @@ function _matrix_power(side, N; inverse=false)
     return TensorRestriction(leg, leg, leg)
 end
 
+# Return the `Int` number of binary units needed for integer leg size `dimension`.
 _binary_units(dimension) = dimension == 1 ? 0 : ndigits(dimension - 1; base=2)
 
+# `a` and `b` are integer seed lengths, `count` is the integer seed-copy
+# count, and `dimension` is the desired integer leg size of the unit tensor.
+# Return the `TensorRestriction` from the seed power to that unit tensor.
 function _seed_to_unit(a, b, count, dimension)
     dimension == 1 && return discard_restriction(_power_dims(seed_dims(a, b), count))
     return compose_restrictions(
@@ -284,6 +333,10 @@ function _seed_to_unit(a, b, count, dimension)
     )
 end
 
+# In the `_WitnessLayout`, `budget` and `tag` are `_WitnessTag`s for the seed
+# budget and the resulting unit factor. `a` and `b` are integer seed lengths,
+# and `dimension` is the integer unit leg size. Subtract the `Int` seed cost
+# from `remaining`, the `BigInt` seed count, and return the updated count.
 function _draw_unit!(layout, budget, remaining, dimension, tag, a, b)
     cost = _binary_units(dimension)
     after = remaining - cost
@@ -304,6 +357,11 @@ end
 # Evaluate the same point at every copy of this phase. For samples 1,…,D+1
 # the constant-term weights are signed binomials. Over a field of arbitrary
 # characteristic, use the mean of evaluations at Lth roots with L > D.
+# `transition` is a `SectorTransition`, `phase` is integer stage 1 or 2, and
+# `N` is the integer tensor power. `admissible_order` is `nothing` or a callable
+# from a `BigInt` order to `Bool`. Return `(; points, restriction)` with a
+# `BigInt` sample count and `TensorRestriction`. The callable `evaluate`
+# constructs a restriction at an integer sample or an exact root of unity.
 function _interpolated_phase(transition, phase, N; admissible_order=nothing)
     degree = N * transition_degree(transition, phase)
     points =
@@ -323,15 +381,19 @@ function _interpolated_phase(transition, phase, N; admissible_order=nothing)
     if points == 1
         return (; points, restriction=power_restriction(sample, N))
     end
+    # Return the `TensorRestriction` at a one-based `BigInt` sample index.
     sample_at(point) = evaluate(use_roots ? root_of_unity(points, point) : point)
     restriction = TensorRestriction(
         ntuple(3) do leg
             source_radix, target_radix = source_dims(sample)[leg], target_dims(sample)[leg]
+            # The `BigInt` sample index gives a `BigInt` or `Rational{BigInt}` weight.
             function weight_at(point)
                 leg != 1 && return big(1)
                 use_roots && return big(1) // points
                 return (isodd(point) ? 1 : -1) * binomial(points, point)
             end
+            # Read a coefficient at one-based `BigInt` row and column indices.
+            # Values are exact rationals or symbolic `PhaseSum`s.
             function coefficient(row, col)
                 c, point = divrem(big(col) - 1, points)
                 point += 1
@@ -347,7 +409,10 @@ function _interpolated_phase(transition, phase, N; admissible_order=nothing)
                 end
                 return weight
             end
+            # For a one-based `BigInt` row, yield (source column, coefficient)
+            # pairs with `BigInt` columns and the same exact coefficient types.
             function entries(row)
+                # Yield the row contributions at the one-based `BigInt` sample index.
                 function sample_rows(point)
                     evaluated = power_restriction(sample_at(point), N)
                     weight = weight_at(point)
@@ -364,6 +429,8 @@ function _interpolated_phase(transition, phase, N; admissible_order=nothing)
     return (; points, restriction)
 end
 
+# `source` is a `_WitnessTag` in the `_WitnessLayout`. Attach that factor to
+# the `(:q, index)` tag for the `Int` predecessor index.
 function _attach_child!(layout, source, index)
     target = (:q, index)
     here = _wire_position(layout, source)
@@ -379,6 +446,10 @@ function _attach_child!(layout, source, index)
     return nothing
 end
 
+# `nodes` is a one-based sequence of `DerivationNode`s, `events` is a sequence
+# of `_WitnessEvent`s, and `N` is the integer power. Return the auxiliary
+# factors and their preparation maps as parallel `Vector{_WitnessWire}` and
+# `Vector{TensorRestriction}` values.
 function _auxiliary_wires(nodes, events, N)
     wires = _WitnessWire[]
     rank_maps = TensorRestriction[]
@@ -399,6 +470,12 @@ function _auxiliary_wires(nodes, events, N)
     return wires, rank_maps
 end
 
+# Update the `_WitnessLayout` for a midpoint or tripling `_WitnessEvent` in
+# the `DerivationNode` sequence. `N` is the integer replica count, `a` and `b`
+# are integer budget seed lengths, and `admissible_order` is `nothing` or a
+# `BigInt`-to-`Bool` order predicate. Return the updated `remaining::BigInt`
+# seed allowance. Factor lists hold `_WitnessDims` and phase records hold
+# a `BigInt` sample count and its `TensorRestriction`.
 function _compile_sector!(
     layout, nodes, event, N, remaining, a, b, admissible_order=nothing
 )
@@ -481,6 +558,11 @@ function _compile_sector!(
     return remaining
 end
 
+# `nodes` is a sequence of `DerivationNode`s, `plan` is the named tuple from
+# `_witness_events`, and `auxiliary` is a `Vector{_WitnessWire}`. `N` and `S`
+# are the integer power and step bound. `admissible_order` is `nothing` or a
+# `BigInt`-to-`Bool` order predicate. Return the composed `TensorRestriction`
+# for one reuse, tracking the `BigInt` seed allowance and matrix side.
 function _compile_round(nodes, plan, auxiliary, N, S, admissible_order=nothing)
     last_node = last(nodes)
     a, b = last_node.a, last_node.b
@@ -597,6 +679,8 @@ struct CompiledWitness
     recipe::Union{Nothing,WitnessRecipe}
 end
 
+# Construct a witness from the integer matrix `side`, integer seed `copies`,
+# and `TensorRestriction`. The counts are stored as `BigInt`s.
 function CompiledWitness(side, copies, restriction)
     return CompiledWitness(side, copies, restriction, nothing)
 end
@@ -610,11 +694,17 @@ the Nth tensor power. The powered auxiliary tensor is prepared once, returned
 by each of N applications, and then restricted to a scalar.
 
 Supply a finite iterable of `DerivationNode` entries in dependency order and a
-positive integer power `N`. An integer `step_bound` must be at least the number
-of non-baseline entries.
+positive integer power `N`. The derivation is collected into a
+`Vector{DerivationNode}`. An integer `step_bound` must be at least the number of
+non-baseline entries. The power, step bound, and seed-copy counts are `BigInt`s
+in the compiler.
 
-Supply an `admissible_order` predicate to choose Fourier orders invertible in
-a coefficient field. This also interpolates every phase at roots of unity.
+When provided, `admissible_order(order)` takes a `BigInt` Fourier order and
+returns a `Bool` indicating whether that order is invertible in the coefficient
+field. This also interpolates every phase at roots of unity.
+
+Return a `CompiledWitness` with a `BigInt` matrix side and seed-copy count,
+the `TensorRestriction`, and the `WitnessRecipe` used to build it.
 """
 function compile_witness(
     nodes, N::Integer; step_bound::Union{Nothing,Integer}=nothing, admissible_order=nothing

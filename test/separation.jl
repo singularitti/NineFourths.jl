@@ -1,3 +1,9 @@
+# `maps` is a triple of callables `f(emit, index)` that each call
+# `emit(coordinate, weight)` for every term in one leg's substitution.
+# `indices` is a triple of source coordinates. A coordinate is an integer
+# for one factor or a tuple of integer indices or `(sector, index)` pairs
+# for several factors. Accumulate `Rational{BigInt}` or `PhaseSum` weights
+# in `coefficients`, a dictionary keyed by triples of emitted coordinates.
 function sector_test_expand!(coefficients, maps, indices)
     maps[1](indices[1]) do x, x_coefficient
         maps[2](indices[2]) do y, y_coefficient
@@ -12,6 +18,10 @@ function sector_test_expand!(coefficients, maps, indices)
     return coefficients
 end
 
+# Add unit-weight terms for integer polynomial lengths `a` and `b` and
+# integer sector label `sector`.
+# `coefficients` is a dictionary with keys `(i, (sector, j), (sector, k))`
+# of integer coordinates and `Rational{BigInt}` weights for the added terms.
 function sector_test_polynomial!(coefficients, a, b, sector)
     for i in 1:a, j in 1:b
         coefficients[(i, (sector, j), (sector, i + j - 1))] = big(1) // 1
@@ -71,6 +81,7 @@ end
 end
 
 @testset "Fixed types and exact Fourier separation" begin
+    # Mixed integer counts in a `Vector{Any}` test exact normalization.
     counts = Any[Int16(2), UInt8(1), big(1)]
     sector_type = NineFourths.SectorType(Iterators.Stateful(counts))
     @test sector_type.counts isa NTuple{3,BigInt}
@@ -80,6 +91,7 @@ end
     empty_type = NineFourths.SectorType(())
     @test NineFourths.type_rank(empty_type, ()) == 1
     @test isempty(NineFourths.type_word(empty_type, 1))
+    # Lexicographic `NTuple{4,Int}` words with multiplicities `(2, 1, 1)`.
     words = [
         (1, 1, 2, 3),
         (1, 1, 3, 2),
@@ -110,6 +122,7 @@ end
 
     sector_type = NineFourths.SectorType((1, 1))
     t = -3 // 2
+    # Map an integer exponent to the exact power of a primitive fourth root.
     rootpower = exponent -> NineFourths.root_of_unity(4, exponent)
     @test NineFourths.evaluation_parameter(Nemo.QQ(t)) == t
     for coordinates in ((101,), (101, 202, 303))
@@ -118,6 +131,8 @@ end
         )
     end
     for (i, word) in enumerate(((1, 2), (2, 1), (2, 2)))
+        # One coordinate per factor. The X indices are integers, and the Y
+        # and Z indices are `(sector, index)` pairs of integers.
         x_indices = (101, 202)
         y_indices = ((word[1], 11), (word[2], 22))
         z_indices = ((word[1], 33), (word[2], 44))
@@ -147,6 +162,8 @@ end
     end
 end
 
+# Pack same-length iterables of one-based integer indices and integer radices
+# as a one-based `BigInt` coordinate, with the first axis varying fastest.
 function sector_test_pack(indices, radices)
     coordinate = big(0)
     stride = big(1)
@@ -172,6 +189,7 @@ end
     @test NineFourths.transition_degree(transition, 2) == 0
     @test_throws DomainError NineFourths.transition_restriction(transition, 1, 0)
     @test_throws DomainError NineFourths.transition_restriction(transition, 2, 1 // 0)
+    # One six-orientation tuple of local leg numbers for each tensor leg.
     legs = ((1, 3, 2, 2, 3, 1), (2, 1, 3, 1, 2, 3), (3, 2, 1, 3, 1, 2))
     dot_copy_two = ((2, 5), (3, 6), (2, 6))
     lengths = (a, b, a + b - 1)
@@ -298,6 +316,8 @@ end
 # For a=1, the two midpoint sectors act by scalar multiplication. The
 # intermediate tensor has coefficient one exactly when the Fourier copies
 # match and each orientation matches its local second and third indices.
+# `columns` is a triple of one-based packed integer source indices. Return
+# the `Int` coefficient `0` or `1`.
 function scalar_midpoint_source_coefficient(columns)
     units = 4^6
     digits = map(column -> divrem(column - 1, units), columns)

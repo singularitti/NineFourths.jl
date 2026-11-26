@@ -1,10 +1,14 @@
-"""An explicit rule has a coefficient that cannot act in the requested scalar field."""
+"""
+An explicit rule has a coefficient that cannot act in the requested scalar field.
+The `message::String` describes the failed coefficient embedding or operation.
+"""
 struct CoefficientIncompatible <: Exception
     message::String
 end
 
 Base.showerror(io::IO, error::CoefficientIncompatible) = print(io, error.message)
 
+# Classify built-in exact scalars separately from types with their own arithmetic.
 const _BuiltinInteger = Union{
     Bool,Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,BigInt
 }
@@ -14,6 +18,7 @@ const _NemoPrimeScalar = Union{Nemo.ZZRingElem,Nemo.QQFieldElem}
 const _FloatingScalar = Union{AbstractFloat,Complex{<:AbstractFloat}}
 const _TypeBasedParent = Union{Nemo.AbstractAlgebra.Integers,Nemo.AbstractAlgebra.Rationals}
 
+# Embed a Julia integer using one_value, the target scalar field's multiplicative identity.
 function _field_integer(one_value, k::Integer)
     n = abs(BigInt(k))
     additive_identity = one_value - one_value
@@ -26,6 +31,7 @@ function _field_integer(one_value, k::Integer)
     return k < 0 ? additive_identity - value : value
 end
 
+# Divide two embedded scalars from the same field. The denominator must be invertible.
 function _field_quotient(numerator, denominator)
     if numerator isa Union{_BuiltinRational,AbstractFloat,Complex}
         return numerator / denominator
@@ -40,6 +46,9 @@ function _field_quotient(numerator, denominator)
     return numerator / denominator
 end
 
+# Embed a Julia Rational using the target field's scalar one_value.
+# The Bool coefficient selects error handling for a scheme weight or an input entry.
+# Fractional scheme weights over Nemo.ZZ can use Nemo.QQ work values.
 function _field_rational(one_value, value::Rational; coefficient=true)
     den = denominator(value)
     if iszero(den)
@@ -74,10 +83,12 @@ function _field_rational(one_value, value::Rational; coefficient=true)
     end
 end
 
+# Test whether an integer stays nonzero in the field represented by scalar one_value.
 function _field_unit_integer(one_value, n::Integer)
     return _field_integer(one_value, n) != one_value - one_value
 end
 
+# A matrix may declare a runtime scalar parent. Nemo matrices supply it through base_ring.
 _matrix_field(matrix) = nothing
 
 function _matrix_field(matrix::Union{Nemo.MatElem,Nemo.MatRingElem})
@@ -85,6 +96,7 @@ function _matrix_field(matrix::Union{Nemo.MatElem,Nemo.MatRingElem})
     return domain isa _TypeBasedParent ? nothing : domain
 end
 
+# For a scalar value, return the runtime field object reported by parent(value), if any.
 function _scalar_field(value)
     value isa Union{_BuiltinExact,AbstractFloat,Complex} && return nothing
     applicable(parent, value) || return nothing
@@ -92,6 +104,8 @@ function _scalar_field(value)
     return domain === value || domain isa Union{Type,_TypeBasedParent} ? nothing : domain
 end
 
+# Merge two runtime field objects or nothing. The Nemo integer and rational
+# rings can promote to a compatible parent.
 function _common_field(a, b)
     isnothing(a) && return b
     isnothing(b) && return a
@@ -103,8 +117,11 @@ function _common_field(a, b)
     return throw(ArgumentError("matrix entries belong to different field parents"))
 end
 
+# The domain is a runtime parent object or nothing.
 _is_nemo_prime_domain(domain) = domain === Nemo.ZZ || domain === Nemo.QQ
 
+# Check compatibility between the inferred source parent and the target parent from field.
+# Either parent may be nothing.
 function _requested_field(source, target)
     if isnothing(source) || source === target || _is_nemo_prime_domain(source)
         return target
@@ -116,9 +133,13 @@ function _requested_field(source, target)
     )
 end
 
+# Convert Nemo integer and rational scalars to their exact Julia equivalents.
 _prime_scalar(value::Nemo.ZZRingElem) = BigInt(value)
 _prime_scalar(value::Nemo.QQFieldElem) = rational_result(value)
 
+# A and B follow the matrix input interface of multiply. Return a named tuple
+# with a runtime domain or nothing, the promoted scalar_type, a sample or nothing,
+# and the Bool flags rational_entries, fractional_entries, and exact_entries.
 function _field_metadata(A, B)
     domain = _common_field(_matrix_field(A), _matrix_field(B))
     scalar_type = Union{}
@@ -166,6 +187,8 @@ function _field_metadata(A, B)
     )
 end
 
+# The unary operation is zero or one. The reference can be a scalar, a scalar type,
+# a field parent, or nothing. Return the identity scalar when available.
 function _optional_identity(operation, reference)
     (isnothing(reference) || reference === Union{}) && return nothing
     try
@@ -176,8 +199,11 @@ function _optional_identity(operation, reference)
     end
 end
 
+# Test whether a field reference accepts both Int identity literals as arguments.
 _callable_field(reference) = applicable(reference, 0) && applicable(reference, 1)
 
+# The Bool callable selects reference(0) and reference(1) for a field constructor
+# or zero/one for a parent, scalar type, or prototype. Missing identities are nothing.
 function _field_identities(reference, callable)
     if callable
         return reference(0), reference(1)
@@ -190,6 +216,10 @@ function _field_identities(reference, callable)
     return zero_value, one_value
 end
 
+# Combine the _field_metadata named tuple with a parent, scalar type, prototype,
+# or nothing. Return a named tuple with the scalar zero and one (or nothing),
+# the output eltype, the optional runtime parent and unary converter, and the
+# legacy Bool for inferred built-in exact inputs.
 function _field_configuration(metadata, field)
     domain, scalar_type, sample = metadata.domain, metadata.scalar_type, metadata.sample
     if isnothing(field) && domain === Nemo.ZZ && metadata.fractional_entries
@@ -255,6 +285,7 @@ function _field_configuration(metadata, field)
     )
 end
 
+# Convert a scalar matrix entry to the representation selected by _field_configuration.
 function _field_entry(options, value)
     T = options.eltype
     value isa T && return value
@@ -275,6 +306,8 @@ function _field_entry(options, value)
     return convert(T, value)
 end
 
+# Embed a scalar scheme weight using the _field_configuration options, allowing
+# CoefficientIncompatible to signal an unsupported coefficient.
 function _field_embed_native(options, value)
     value isa _NemoPrimeScalar && (value = _prime_scalar(value))
     if value isa _BuiltinInteger
@@ -298,6 +331,8 @@ function _field_embed_native(options, value)
     end
 end
 
+# Read a matrix-like input in axis order into a one-based Matrix{T}. The unary
+# convert_entry callback maps a scalar entry to a value assignable to T.
 function _copy_field_matrix(convert_entry, matrix, ::Type{T}) where {T}
     result = Matrix{T}(undef, size(matrix)...)
     rows, columns = axes(matrix)
@@ -312,6 +347,8 @@ function _copy_field_matrix(convert_entry, matrix, ::Type{T}) where {T}
     return result
 end
 
+# Normalize the axes of a matrix-like built-in integer or rational input
+# while preserving the original scalar representation.
 function _legacy_matrix(matrix)
     if matrix isa AbstractMatrix && !Base.has_offset_axes(matrix)
         return matrix
@@ -319,6 +356,7 @@ function _legacy_matrix(matrix)
     return _copy_field_matrix(identity, matrix, eltype(matrix))
 end
 
+# Validate the dimensions of m×k and k×n matrix-like inputs and return (m, k, n).
 function _multiplication_shape(A, B)
     m, k = _matrix_size(A)
     right_rows, n = _matrix_size(B)
@@ -326,6 +364,10 @@ function _multiplication_shape(A, B)
     return (m, k, n)
 end
 
+# A and B follow the matrix input interface of multiply. The shape is (m, k, n)
+# from _multiplication_shape, and field is a parent, scalar type, prototype, or nothing.
+# Return _field_configuration's named tuple with one-based left and right matrices
+# for positive dimensions, or nothing for both matrices when any dimension is zero.
 function _field_inputs(A, B, shape=_multiplication_shape(A, B); field=nothing)
     m, k, n = shape
     options = _field_configuration(_field_metadata(A, B), field)
@@ -347,6 +389,7 @@ function _field_inputs(A, B, shape=_multiplication_shape(A, B); field=nothing)
     if options.legacy
         return (; left=_legacy_matrix(A), right=_legacy_matrix(B), options...)
     end
+    # Convert one scalar matrix entry using the selected field configuration.
     convert_entry(value) = _field_entry(options, value)
     T = options.eltype
     return (;

@@ -1,13 +1,16 @@
+# Default Int budgets for recursive coefficient reads and live dense entries.
 const DEFAULT_COEFFICIENT_VISITS = 10_000_000
 const DEFAULT_WORKSPACE_ENTRIES = 10_000_000
 
 """
     ExecutionInfeasible
 
-The requested multiplication could not run a scheme layer. `reason` identifies
-the failed check. `input_shape` gives `(m, k, n)` for an `m×k` by `k×n`
-product. `input_size` gives the common size for square inputs. `block_side`
-describes the scheme, and `limit` holds the relevant resource bound, if any.
+The requested multiplication could not run a scheme layer. The `reason` symbol
+identifies the failed check. The `input_shape::NTuple{3,Int}` gives `(m, k, n)`
+for an `m×k` by `k×n` product. The `input_size` is the common `Int` dimension
+for square inputs of equal size and `nothing` otherwise. The `block_side` may
+be an integer, a symbolic `WitnessSide`, or `nothing` for a zero dimension.
+The `limit` is the relevant resource bound as a `BigInt` or `nothing`.
 """
 struct ExecutionInfeasible{S} <: Exception
     reason::Symbol
@@ -42,6 +45,8 @@ function Base.showerror(io::IO, error::ExecutionInfeasible)
     end
 end
 
+# Explain a scheme's index or visit limit for a numeric or symbolic side.
+# The visits argument is the integer coefficient-visit budget.
 function _show_dimension_failure(io::IO, side::Integer, visits)
     max_side = isqrt(typemax(Int))
     return if side > max_side
@@ -79,6 +84,8 @@ function _show_dimension_failure(io::IO, side::WitnessSide, visits)
     end
 end
 
+# Package a Symbol reason, an (m, k, n) shape of Int dimensions, a scheme that
+# supplies block_side, and the integer limit or nothing.
 function _execution_failure(reason, shape, scheme, limit=nothing)
     m, k, n = shape
     square_side = m == k == n ? m : nothing
@@ -88,24 +95,37 @@ function _execution_failure(reason, shape, scheme, limit=nothing)
     )
 end
 
+# Return BigInt entry counts for the left input, right input, and output matrices.
 _matrix_entries((m, k, n)) = (big(m) * k, big(k) * n, big(m) * n)
 
+# The entries are a nonempty collection of integer counts, typically BigInt.
 function _has_addressable_matrices(entries)
     bytes_per_entry = max(sizeof(Int), Base.elsize(Matrix{Rational{BigInt}}))
     return maximum(entries) <= div(typemax(Int), bytes_per_entry)
 end
 
+# The shape is the integer triple (m, k, n) of one layer and side is the integer
+# number of blocks along each axis. Return the corresponding child dimensions.
 _child_shape(shape, side) = map(dimension -> cld(dimension, side), shape)
+
+# The shape and child are (m, k, n) triples for this layer and its child.
+# Return the number of nonempty blocks along each dimension.
 _active_blocks(shape, child) = map(cld, shape, child)
+
+# Use another scheme layer when the integer side exceeds one and fits each
+# of the three integer dimensions in child_shape.
 _apply_child_layer(side, child_shape) = side > 1 && minimum(child_shape) >= side
 
 # A previously specialized seed can shrink when moved into another field.
 # Use its smallest possible rank before input normalization, then enforce
 # the actual rank after selecting the Fourier orders in the common field.
+# Both limits are integers. Return (side, rank) within the limits or nothing.
 function _minimum_dimensions(scheme, max_side, max_rank)
     return execution_dimensions(scheme, max_side, max_rank)
 end
 
+# For a LoweredScheme, compare the block side and smallest possible rank
+# after field specialization with the integer limits max_side and max_rank.
 function _minimum_dimensions(scheme::LoweredScheme, max_side, max_rank)
     side = block_side(scheme)
     side <= max_side || return nothing
@@ -116,6 +136,10 @@ function _minimum_dimensions(scheme::LoweredScheme, max_side, max_rank)
     return isnothing(rank) ? nothing : (Int(side), Int(rank))
 end
 
+# Plan an (m, k, n) product with positive Int dimensions and nonnegative
+# integer budgets. The dimensions_for(scheme, max_side, max_rank) callback
+# returns positive integer (side, rank) within the bounds or nothing.
+# Return a named tuple (; side, rank) or an ExecutionInfeasible value.
 function _execution_plan(
     shape,
     scheme,
@@ -163,6 +187,8 @@ function _execution_plan(
     end
 end
 
+# Enforce the integer entry budget for the two inputs and output of an (m, k, n)
+# product. The scheme supplies block_side for diagnostics.
 function _check_classical_workspace(shape, scheme, max_workspace_entries)
     entries = _matrix_entries(shape)
     _has_addressable_matrices(entries) ||
@@ -173,6 +199,8 @@ function _check_classical_workspace(shape, scheme, max_workspace_entries)
     return nothing
 end
 
+# Enforce the integer entry budget for the m×n output when the (m, k, n)
+# shape has a zero dimension. The scheme is passed along for diagnostics.
 function _check_zero_workspace(shape, scheme, max_workspace_entries)
     m, _, n = shape
     output_entries = big(m) * n

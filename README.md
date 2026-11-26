@@ -130,9 +130,11 @@ their conversion to matrix multiplication algorithms. [OpenAI, *An Upper Bound o
 
 ## Questions and contributions
 
-Document the operations each argument needs and give typical input types in
-the docstring. Use argument annotations when they select an implementation
-or enforce a mathematical requirement, such as an integer tensor power.
+Describe arguments, callbacks, and stored values by their intended Julia types
+and the operations they need. Put this information in the existing docstring.
+For a definition without a docstring, put a short comment immediately above it.
+Use argument annotations when they select an implementation or enforce a
+mathematical requirement, such as an integer tensor power.
 
 You can post usage questions on
 [our discussion page](https://github.com/singularitti/NineFourths.jl/discussions).

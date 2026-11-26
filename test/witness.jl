@@ -1,4 +1,6 @@
 @testset "Catalytic witness compilation" begin
+    # Build a `DerivationNode` from integer lengths and bound, a `Symbol` step
+    # kind, and an optional tuple of one-based integer predecessor indices.
     function node(a, b, value, kind, parents=())
         return NineFourths.DerivationNode(big(a), big(b), big(value) // 1, kind, parents)
     end
@@ -60,6 +62,8 @@
 end
 
 @testset "Witness substitution coefficients" begin
+    # Convert `NTuple{N,Int}` axis sizes and one-based coordinates to a
+    # one-based column-major `Int` index.
     index(dims, coordinates) = LinearIndices(dims)[CartesianIndex(coordinates)]
     seed_coordinates = (1, 2, 2, 1, 2, 1)
     source = index((2, 4, 3, 3, 4, 2), seed_coordinates)
@@ -121,6 +125,10 @@ end
 # In Q(1,2), the two nonscalar legs of each orientation carry the same
 # binary index. Grouping these digits by the scalar leg gives the two
 # matrix indices on each source leg, even across powered copies of Q.
+# `witness` is a `CompiledWitness` over copies of Q(1,2). Integer `leg` and
+# `row` select a restriction row. `embed(weight)` maps each exact coefficient
+# to the field of `zero_weight`. Return a dictionary from zero-based
+# `(BigInt, BigInt)` source matrix indices to weights of that field.
 function midpoint_test_source_pairs(
     witness, leg, row; embed=identity, zero_weight=big(0) // 1
 )
@@ -130,6 +138,8 @@ function midpoint_test_source_pairs(
     positions = map(
         shared -> findall(orientation -> orientation[shared] == 1, active), shared_legs
     )
+    # Extract an axis index as a `BigInt` from a zero-based packed source
+    # column, using the same one-based integer bit positions in each copy.
     function axis_index(source, digits)
         index, place = big(0), big(1)
         for _ in 1:witness.copies
@@ -149,13 +159,18 @@ function midpoint_test_source_pairs(
     return weights
 end
 
+# Check a `CompiledWitness` from copies of Q(1,2) to 2×2 matrix multiplication.
+# `embed` maps integer indicators and exact weights (integers, rationals, or
+# `PhaseSum`s in these tests) to the coefficient domain of `zero_weight`.
 function test_midpoint_tensor_identity(witness; embed=identity, zero_weight=big(0) // 1)
     Weight = typeof(zero_weight)
+    # Three vectors of sparse row dictionaries, four target rows per leg.
     rows = ntuple(3) do leg
         return [
             midpoint_test_source_pairs(witness, leg, row; embed, zero_weight) for row in 1:4
         ]
     end
+    # Group each right-leg row by its `BigInt` inner matrix index.
     right_buckets = map(rows[2]) do right
         by_inner = Dict{BigInt,Vector{Tuple{BigInt,Weight}}}()
         for ((inner, column), weight) in right
