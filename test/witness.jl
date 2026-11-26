@@ -116,10 +116,8 @@ end
     phase = NineFourths._interpolated_phase(transition, 1, 2)
     weights = [phase.restriction.legs[1][1, point] for point in 1:phase.points]
     @test sum(weights) == 1
-    @test all(
-        iszero(sum(weights[point] * point^degree for point in 1:phase.points)) for
-        degree in 1:(phase.points - 1)
-    )
+    @test all(iszero(sum(weights[point] * point^degree for point in 1:phase.points)) for
+              degree in 1:(phase.points - 1))
 end
 
 # In Q(1,2), the two nonscalar legs of each orientation carry the same

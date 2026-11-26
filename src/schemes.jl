@@ -69,7 +69,9 @@ struct ShpilkaProgram{Ops<:Tuple}
     operations::Ops
 end
 
-"""A bilinear scheme pairing a `ShpilkaDerivation` with its finite `ShpilkaProgram`."""
+"""
+A bilinear scheme pairing a `ShpilkaDerivation` with its finite `ShpilkaProgram`.
+"""
 struct ShpilkaScheme{P<:ShpilkaProgram} <: BilinearScheme
     derivation::ShpilkaDerivation
     program::P
@@ -311,25 +313,16 @@ function materialize(c::ShpilkaCoefficient; max_leg_bits::Integer)
     # Each of the three polynomial factors is at least 2^q. Check before
     # attempting to allocate either the seed dimensions or any proof nodes.
     lower = 6 * s.program.copies * p.q + 1
-    lower <= max_leg_bits || throw(
-        ArgumentError(
-            "a source-leg dimension needs at least $lower bits, " *
-            "exceeding the requested budget of $max_leg_bits",
-        ),
-    )
-    lower <= typemax(Int) || throw(
-        ArgumentError(
-            "a source-leg dimension needs at least $lower bits, " *
-            "beyond addressable bit lengths on this runtime",
-        ),
-    )
+    lower <= max_leg_bits ||
+        throw(ArgumentError("a source-leg dimension needs at least $lower bits, " *
+                            "exceeding the requested budget of $max_leg_bits",),)
+    lower <= typemax(Int) ||
+        throw(ArgumentError("a source-leg dimension needs at least $lower bits, " *
+                            "beyond addressable bit lengths on this runtime",),)
     # log2(seed_dim) = 2m log2(a²(2a-1)); use an upper bound without expanding a.
     upper = 2 * s.program.copies * (3 * (p.q + ndigits(p.q; base=2)) + 1) + 1
-    upper <= max_leg_bits || throw(
-        ArgumentError(
-            "the source-leg dimension could exceed the requested budget " *
-            "(upper bound $upper bits)",
-        ),
-    )
+    upper <= max_leg_bits ||
+        throw(ArgumentError("the source-leg dimension could exceed the requested budget " *
+                            "(upper bound $upper bits)",),)
     return scheme_coefficient(lower_scheme(s), c.term, c.leg, c.coordinate)
 end

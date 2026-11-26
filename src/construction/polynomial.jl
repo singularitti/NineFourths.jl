@@ -20,9 +20,7 @@ function _sample_order(admissible_order, preferred, alternate)
     isnothing(admissible_order) && return preferred
     admissible_order(preferred) && return preferred
     admissible_order(alternate) && return alternate
-    return throw(
-        ArgumentError("neither root-of-unity order is invertible in the coefficient field")
-    )
+    return throw(ArgumentError("neither root-of-unity order is invertible in the coefficient field"))
 end
 
 """

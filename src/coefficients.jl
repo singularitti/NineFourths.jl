@@ -207,13 +207,12 @@ Apply the binary callable `op`, such as `+` or `==`, to a `PhaseSum` `left`
 and a `Nemo.QQBarFieldElem` `right`. If `right` is rational, `op` receives
 `left` and a `Rational{BigInt}`. Otherwise, it receives two `Nemo.QQBarFieldElem`s.
 """
-function with_qqbar(op, left, right)
-    return if Nemo.is_rational(right)
+with_qqbar(op, left, right) =
+    if Nemo.is_rational(right)
         op(left, rational_result(right))
     else
         op(as_qqbar(left), right)
     end
-end
 
 Base.:+(left::PhaseSum, right::Nemo.QQBarFieldElem) = with_qqbar(+, left, right)
 Base.:+(left::Nemo.QQBarFieldElem, right::PhaseSum) = right + left

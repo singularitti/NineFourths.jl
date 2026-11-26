@@ -56,11 +56,7 @@ function _scheme_weight(field, value::Nemo.QQBarFieldElem)
             return complex(rational_result(real(value)), rational_result(imag(value)))
         catch error
             error isa DomainError || rethrow()
-            throw(
-                CoefficientIncompatible(
-                    "the algebraic coefficient is outside the Gaussian rational field"
-                ),
-            )
+            throw(CoefficientIncompatible("the algebraic coefficient is outside the Gaussian rational field"),)
         end
     end
     return _field_embed_native(field, value)

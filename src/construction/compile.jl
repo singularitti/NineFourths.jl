@@ -205,15 +205,13 @@ end
 # converts a `BigInt` target row to a `BigInt` source column using six radices.
 function _seed_restrict(a, b, c, d)
     src, dst = (a, b, a + b - 1), (c, d, c + d - 1)
-    return TensorRestriction(
-        ntuple(3) do leg
-            sd = map(p -> src[p[leg]], LEG_PERMUTATIONS)
-            td = map(p -> dst[p[leg]], LEG_PERMUTATIONS)
-            return selection_map(
-                prod(sd), prod(td), row -> _coordinate(_coordinates(row, td), sd)
-            )
-        end...,
-    )
+    return TensorRestriction(ntuple(3) do leg
+        sd = map(p -> src[p[leg]], LEG_PERMUTATIONS)
+        td = map(p -> dst[p[leg]], LEG_PERMUTATIONS)
+        return selection_map(
+            prod(sd), prod(td), row -> _coordinate(_coordinates(row, td), sd)
+        )
+    end...,)
 end
 
 # `a` and `b` are positive integer polynomial lengths. The `TensorRestriction`
@@ -226,15 +224,13 @@ function _seed_symmetry(a, b)
         return findfirst(==(swapped), LEG_PERMUTATIONS)
     end
     inverse = invperm(collect(order))
-    return TensorRestriction(
-        ntuple(3) do leg
-            sd = map(p -> src[p[leg]], LEG_PERMUTATIONS)
-            td = map(i -> sd[i], order)
-            return selection_map(
-                prod(sd), prod(td), row -> _coordinate(_coordinates(row, td)[inverse], sd)
-            )
-        end...,
-    )
+    return TensorRestriction(ntuple(3) do leg
+        sd = map(p -> src[p[leg]], LEG_PERMUTATIONS)
+        td = map(i -> sd[i], order)
+        return selection_map(
+            prod(sd), prod(td), row -> _coordinate(_coordinates(row, td)[inverse], sd)
+        )
+    end...,)
 end
 
 # Change from (U^N)⊗(V^N)⊗⋯ to (U⊗V⊗⋯)^N, or the inverse. The
@@ -247,38 +243,36 @@ function _replica_order(factors, N; inverse=false)
     dimensions = ntuple(leg -> prod((dims[leg] for dims in factors); init=big(1)), 3)
     powered = _power_dims(dimensions, N)
     (N == 1 || length(factors) <= 1) && return identity_restriction(powered)
-    return TensorRestriction(
-        ntuple(3) do leg
-            radices = [dims[leg] for dims in factors]
-            wire_radices = [d^N for d in radices]
-            # Map one-based `BigInt` indices from wire order to replica order.
-            function replica_major(index)
-                remaining = _coordinates(index, wire_radices) .- 1
-                result, stride = big(1), big(1)
-                for _ in 1:N, i in eachindex(radices)
-                    remaining[i], digit = divrem(remaining[i], radices[i])
-                    result += digit * stride
-                    stride *= radices[i]
-                end
-                return result
+    return TensorRestriction(ntuple(3) do leg
+        radices = [dims[leg] for dims in factors]
+        wire_radices = [d^N for d in radices]
+        # Map one-based `BigInt` indices from wire order to replica order.
+        function replica_major(index)
+            remaining = _coordinates(index, wire_radices) .- 1
+            result, stride = big(1), big(1)
+            for _ in 1:N, i in eachindex(radices)
+                remaining[i], digit = divrem(remaining[i], radices[i])
+                result += digit * stride
+                stride *= radices[i]
             end
-            # Map one-based `BigInt` indices from replica order to wire order.
-            function wire_major(index)
-                remaining = big(index) - 1
-                coordinates = ones(BigInt, length(radices))
-                strides = ones(BigInt, length(radices))
-                for _ in 1:N, i in eachindex(radices)
-                    remaining, digit = divrem(remaining, radices[i])
-                    coordinates[i] += digit * strides[i]
-                    strides[i] *= radices[i]
-                end
-                return _coordinate(coordinates, wire_radices)
+            return result
+        end
+        # Map one-based `BigInt` indices from replica order to wire order.
+        function wire_major(index)
+            remaining = big(index) - 1
+            coordinates = ones(BigInt, length(radices))
+            strides = ones(BigInt, length(radices))
+            for _ in 1:N, i in eachindex(radices)
+                remaining, digit = divrem(remaining, radices[i])
+                coordinates[i] += digit * strides[i]
+                strides[i] *= radices[i]
             end
-            return selection_map(
-                powered[leg], powered[leg], inverse ? replica_major : wire_major
-            )
-        end...,
-    )
+            return _coordinate(coordinates, wire_radices)
+        end
+        return selection_map(
+            powered[leg], powered[leg], inverse ? replica_major : wire_major
+        )
+    end...,)
 end
 
 # A matrix side power uses one packed row/column pair, whereas a tensor power
@@ -383,49 +377,45 @@ function _interpolated_phase(transition, phase, N; admissible_order=nothing)
     end
     # Return the `TensorRestriction` at a one-based `BigInt` sample index.
     sample_at(point) = evaluate(use_roots ? root_of_unity(points, point) : point)
-    restriction = TensorRestriction(
-        ntuple(3) do leg
-            source_radix, target_radix = source_dims(sample)[leg], target_dims(sample)[leg]
-            # The `BigInt` sample index gives a `BigInt` or `Rational{BigInt}` weight.
-            function weight_at(point)
-                leg != 1 && return big(1)
-                use_roots && return big(1) // points
-                return (isodd(point) ? 1 : -1) * binomial(points, point)
+    restriction = TensorRestriction(ntuple(3) do leg
+        source_radix, target_radix = source_dims(sample)[leg], target_dims(sample)[leg]
+        # The `BigInt` sample index gives a `BigInt` or `Rational{BigInt}` weight.
+        function weight_at(point)
+            leg != 1 && return big(1)
+            use_roots && return big(1) // points
+            return (isodd(point) ? 1 : -1) * binomial(points, point)
+        end
+        # Read a coefficient at one-based `BigInt` row and column indices.
+        # Values are exact rationals or symbolic `PhaseSum`s.
+        function coefficient(row, col)
+            c, point = divrem(big(col) - 1, points)
+            point += 1
+            r = big(row) - 1
+            evaluated = sample_at(point).legs[leg]
+            weight = weight_at(point)
+            for _ in 1:N
+                r, i = divrem(r, target_radix)
+                c, j = divrem(c, source_radix)
+                term = evaluated[i + 1, j + 1]
+                iszero(term) && return term
+                weight *= term
             end
-            # Read a coefficient at one-based `BigInt` row and column indices.
-            # Values are exact rationals or symbolic `PhaseSum`s.
-            function coefficient(row, col)
-                c, point = divrem(big(col) - 1, points)
-                point += 1
-                r = big(row) - 1
-                evaluated = sample_at(point).legs[leg]
+            return weight
+        end
+        # For a one-based `BigInt` row, yield (source column, coefficient)
+        # pairs with `BigInt` columns and the same exact coefficient types.
+        function entries(row)
+            # Yield the row contributions at the one-based `BigInt` sample index.
+            function sample_rows(point)
+                evaluated = power_restriction(sample_at(point), N)
                 weight = weight_at(point)
-                for _ in 1:N
-                    r, i = divrem(r, target_radix)
-                    c, j = divrem(c, source_radix)
-                    term = evaluated[i + 1, j + 1]
-                    iszero(term) && return term
-                    weight *= term
-                end
-                return weight
+                return ((point + points * (col - 1), weight * value) for
+                        (col, value) in row_entries(evaluated.legs[leg], row))
             end
-            # For a one-based `BigInt` row, yield (source column, coefficient)
-            # pairs with `BigInt` columns and the same exact coefficient types.
-            function entries(row)
-                # Yield the row contributions at the one-based `BigInt` sample index.
-                function sample_rows(point)
-                    evaluated = power_restriction(sample_at(point), N)
-                    weight = weight_at(point)
-                    return (
-                        (point + points * (col - 1), weight * value) for
-                        (col, value) in row_entries(evaluated.legs[leg], row)
-                    )
-                end
-                return Iterators.flatten(sample_rows(point) for point in 1:points)
-            end
-            return LegMap(points * src[leg], dst[leg], coefficient, entries)
-        end...,
-    )
+            return Iterators.flatten(sample_rows(point) for point in 1:points)
+        end
+        return LegMap(points * src[leg], dst[leg], coefficient, entries)
+    end...,)
     return (; points, restriction)
 end
 
@@ -569,15 +559,13 @@ function _compile_round(nodes, plan, auxiliary, N, S, admissible_order=nothing)
     starting = (:q, length(nodes))
     budget = (:budget, 0)
     allowance = 18S * N
-    layout = _WitnessLayout(
-        vcat(
-            [
-                _wire(starting, _power_dims(seed_dims(a, b), N^2)),
-                _wire(budget, _power_dims(seed_dims(a, b), allowance)),
-            ],
-            auxiliary,
-        ),
-    )
+    layout = _WitnessLayout(vcat(
+        [
+            _wire(starting, _power_dims(seed_dims(a, b), N^2)),
+            _wire(budget, _power_dims(seed_dims(a, b), allowance)),
+        ],
+        auxiliary,
+    ),)
     executed = _WitnessEvent[]
     fallback = false
     for event in plan.events

@@ -126,11 +126,7 @@ function _requested_field(source, target)
     if isnothing(source) || source === target || _is_nemo_prime_domain(source)
         return target
     end
-    return throw(
-        ArgumentError(
-            "matrix entries belong to a different parent than the requested field"
-        ),
-    )
+    return throw(ArgumentError("matrix entries belong to a different parent than the requested field"),)
 end
 
 # Convert Nemo integer and rational scalars to their exact Julia equivalents.
@@ -317,11 +313,7 @@ function _field_embed_native(options, value)
     end
     domain = _scalar_field(value)
     if !isnothing(domain) && domain !== options.parent
-        throw(
-            CoefficientIncompatible(
-                "scheme coefficient belongs to a different field parent"
-            ),
-        )
+        throw(CoefficientIncompatible("scheme coefficient belongs to a different field parent"),)
     end
     try
         return _field_entry(options, value)
@@ -372,20 +364,13 @@ function _field_inputs(A, B, shape=_multiplication_shape(A, B); field=nothing)
     m, k, n = shape
     options = _field_configuration(_field_metadata(A, B), field)
     if (m > 0 && n > 0) && isnothing(options.zero)
-        throw(
-            ArgumentError(
-                "cannot determine the additive identity of the input field; supply field"
-            ),
-        )
+        throw(ArgumentError("cannot determine the additive identity of the input field; supply field"),)
     end
     if iszero(m) || iszero(k) || iszero(n)
         return (; left=nothing, right=nothing, options...)
     end
-    isnothing(options.one) && throw(
-        ArgumentError(
-            "cannot determine the multiplicative identity of the input field; supply field",
-        ),
-    )
+    isnothing(options.one) &&
+        throw(ArgumentError("cannot determine the multiplicative identity of the input field; supply field",),)
     if options.legacy
         return (; left=_legacy_matrix(A), right=_legacy_matrix(B), options...)
     end

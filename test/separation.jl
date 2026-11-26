@@ -107,15 +107,11 @@ end
         (3, 2, 1, 1),
     ]
     @test sector_type.multiplicity == length(words)
-    @test all(
-        NineFourths.type_rank(sector_type, word) == rank for
-        (rank, word) in enumerate(words)
-    )
+    @test all(NineFourths.type_rank(sector_type, word) == rank for
+              (rank, word) in enumerate(words))
     @test NineFourths.type_rank(sector_type, Iterators.filter(>(0), (1, 0, 2, 1, 3))) == 3
-    @test all(
-        Tuple(NineFourths.type_word(sector_type, rank)) == word for
-        (rank, word) in enumerate(words)
-    )
+    @test all(Tuple(NineFourths.type_word(sector_type, rank)) == word for
+              (rank, word) in enumerate(words))
     @test isnothing(NineFourths.type_rank(sector_type, (1, 1, 1, 2)))
     @test isnothing(NineFourths.type_rank(sector_type, (1, 1, 2)))
     @test isnothing(NineFourths.type_rank(sector_type, (1, 1, 2, 3, 1)))
@@ -156,9 +152,8 @@ end
                 expected[((j, 1, x), (i, k, y), (i, l, z))] = t^((j - i)^2)
             end
         end
-        @test Dict(
-            key => NineFourths.rational_result(value) for (key, value) in observed
-        ) == expected
+        @test Dict(key => NineFourths.rational_result(value) for (key, value) in observed) ==
+            expected
     end
 end
 
@@ -202,9 +197,8 @@ end
         end
         column = 64 * (sector_test_pack(coordinates, radices) - 1) + 1
         row = 64 * dimensions[leg] * 9 + 1 # Zero-based matrix digits 1 and 2.
-        expected = prod(
-            legs[leg][orientation] == 2 ? inv(t) : t for orientation in dot_copy_two[leg]
-        )
+        expected = prod(legs[leg][orientation] == 2 ? inv(t) : t for
+                        orientation in dot_copy_two[leg])
         leg_map = first_stage.legs[leg]
         @test leg_map[column, row] == expected
         @test iszero(leg_map[column, row + 1])

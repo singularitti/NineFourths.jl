@@ -220,8 +220,7 @@ exact rational or an invertible `PhaseSum` monomial, as accepted by
 
 The finite iterable `coordinates` supplies one integer index per factor
 on leg 1 or one pair of integers `(sector, index)` per factor on legs 2
-and 3. Words outside the fixed type are dropped. `emit(coordinate,
-coefficient)` receives one term at a time. Each image coordinate is
+and 3. Words outside the fixed type are dropped. `emit(coordinate, coefficient)` receives one term at a time. Each image coordinate is
 `(type_rank, dot_index, canonical_indices)` with two one-based integers
 and a tuple of integer indices. The first leg uses `dot_index == 1`.
 
@@ -231,14 +230,7 @@ multiplication by the exact evaluation coefficient. With the default root,
 the emitted coefficient is a `Rational{BigInt}` or `PhaseSum`.
 """
 function separation_column(
-    emit,
-    sector_type,
-    leg,
-    ρ,
-    coordinates,
-    t,
-    rootpower=nothing;
-    admissible_order=nothing,
+    emit, sector_type, leg, ρ, coordinates, t, rootpower=nothing; admissible_order=nothing
 )
     t = evaluation_parameter(t)
     M = sector_type.multiplicity

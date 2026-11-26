@@ -18,9 +18,10 @@
     @test large_root^(large_order ÷ 2) == -1
     @test NineFourths.rational_result(1 + third_root + third_root^2) == 0
     @test iszero(large_root + large_root * third_root + large_root * third_root^2)
-    @test NineFourths.rational_result(
-        1 + large_root + large_root * third_root + large_root * third_root^2
-    ) == 1
+    @test NineFourths.rational_result(1 +
+                                      large_root +
+                                      large_root * third_root +
+                                      large_root * third_root^2) == 1
 
     rational = big(2)//3
     algebraic = NineFourths.ALGEBRAIC_NUMBERS(big(1)//3)

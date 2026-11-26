@@ -294,9 +294,8 @@ function _sector_second_leg(transition, leg, t, L)
     output_radices = ntuple(length(sector_type.counts)) do sector
         return _sector_output_radices(transition, leg, sector)
     end
-    output_q = prod(
-        prod(radices)^n for (radices, n) in zip(output_radices, sector_type.counts)
-    )
+    output_q = prod(prod(radices)^n for
+                    (radices, n) in zip(output_radices, sector_type.counts))
     source_dim = input_units * prod(middle_radices)^count
     target_dim = output_units * output_q * M^4
     # A BigInt target row gives a zero-based BigInt packed input index, six
@@ -372,12 +371,10 @@ function _sector_second_leg(transition, leg, t, L)
         input_q, phases, weight = row_parameters(target_row)
         scale = t^weight / L^2
         base_column = input_q * input_units + 1
-        return (
-            (
-                base_column + sum(digits[i] * copy_strides[i] for i in 1:6),
-                phase_coefficient(digits, phases, scale),
-            ) for digits in active_digits
-        )
+        return ((
+            base_column + sum(digits[i] * copy_strides[i] for i in 1:6),
+            phase_coefficient(digits, phases, scale),
+        ) for digits in active_digits)
     end
     return LegMap(source_dim, target_dim, coefficient, entries)
 end

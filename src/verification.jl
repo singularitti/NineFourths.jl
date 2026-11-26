@@ -128,11 +128,7 @@ function _verification_coefficients(tables, field)
         zero_value == one_value ||
         _unsupported_verification_scalar(one_value) ||
         (one_value isa _BuiltinExact && !(one_value isa Union{BigInt,Rational{BigInt}}))
-        throw(
-            CoefficientIncompatible(
-                "The explicit maps require identities in a supported exact field."
-            ),
-        )
+        throw(CoefficientIncompatible("The explicit maps require identities in a supported exact field."),)
     end
     converted = map(
         T -> map(value -> _native_verification_scalar(options, value), T), tables
@@ -160,34 +156,26 @@ function _verify_coefficient_tables(u, U, V, W; field=nothing)
         dimensions[2] < 1 ||
         size(V) != dimensions ||
         size(W) != dimensions
-        return _verification_failure(
-            "Each explicit map must have one row per matrix entry " *
-            "and one column per rank term.",
-        )
+        return _verification_failure("Each explicit map must have one row per matrix entry " *
+                                     "and one column per rank term.",)
     end
     tables = map(_verification_entries, (U, V, W))
     if any(T -> any(value -> value isa _BuiltinRational && !isfinite(value), T), tables)
         return _verification_failure("The explicit maps must have finite coefficients.")
     end
     if any(T -> any(_unsupported_verification_scalar, T), tables)
-        return _verification_failure(
-            "The explicit maps require coefficients in a supported exact field."
-        )
+        return _verification_failure("The explicit maps require coefficients in a supported exact field.")
     end
     try
         coefficients, zero_value, one_value = _verification_coefficients(tables, field)
         return _check_matrix_unit_coefficients(u, coefficients, zero_value, one_value)
     catch err
         if err isa ArgumentError
-            return _verification_failure(
-                "The explicit map coefficients do not share a compatible field parent."
-            )
+            return _verification_failure("The explicit map coefficients do not share a compatible field parent.")
         elseif err isa CoefficientIncompatible
             return _verification_failure(err.message)
         elseif err isa Union{MethodError,InexactError,DomainError,DivideError,TypeError}
-            return _verification_failure(
-                "The explicit map coefficients cannot be combined in a common exact field."
-            )
+            return _verification_failure("The explicit map coefficients cannot be combined in a common exact field.")
         end
         rethrow()
     end
@@ -213,11 +201,9 @@ function _check_matrix_unit_coefficients(u, (U, V, W), zero_value, one_value)
             expected = left_inner == right_inner && Tuple(coordinates[z]) == (i, j)
             coefficient == (expected ? one_value : zero_value) && continue
             coordinate = Tuple(coordinates[z])
-            return _verification_failure(
-                "The coefficient at output $coordinate for input matrix units " *
-                "($i, $left_inner) and ($right_inner, $j) differs " *
-                "from matrix multiplication.",
-            )
+            return _verification_failure("The coefficient at output $coordinate for input matrix units " *
+                                         "($i, $left_inner) and ($right_inner, $j) differs " *
+                                         "from matrix multiplication.",)
         end
     end
     exponent = u >= 2 ? RankExponent(Int(u), rank) : nothing
@@ -238,9 +224,7 @@ function verify_scheme(scheme::LoweredScheme; max_terms::Integer=1_000_000)
         throw(DomainError(max_terms, "the verification budget must be nonnegative"))
     u, rank = block_side(scheme), rank_count(scheme.seed)
     if u < 1 || rank < 1
-        return _verification_failure(
-            "The lowered scheme must have positive dimension and rank."
-        )
+        return _verification_failure("The lowered scheme must have positive dimension and rank.")
     end
     entries = u^2
     work_bound = rank * (3entries + entries^3)
@@ -262,9 +246,7 @@ function verify_scheme(scheme::LoweredScheme; max_terms::Integer=1_000_000)
         end
     catch err
         err isa BoundsError || rethrow()
-        return _verification_failure(
-            "A lowered restriction references a source coefficient outside the seed."
-        )
+        return _verification_failure("A lowered restriction references a source coefficient outside the seed.")
     end
     return _verify_coefficient_tables(u, tables...)
 end

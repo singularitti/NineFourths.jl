@@ -42,10 +42,8 @@ function row_entries(m, row::Integer)
     1 <= row <= m.out_dim || throw(BoundsError(m, row))
     row_index = big(row)
     isnothing(m.support) || return m.support(row_index)
-    return (
-        (col, weight) for col in 1:m.in_dim for
-        weight in (m.entry(row_index, col),) if !iszero(weight)
-    )
+    return ((col, weight) for col in 1:m.in_dim for
+            weight in (m.entry(row_index, col),) if !iszero(weight))
 end
 
 """
@@ -120,10 +118,8 @@ function _compose_maps(a, b)
     # Contributions at the same source index may occur several times.
     # Downstream contractions add them, including exact cancellations.
     function entries(row)
-        return (
-            (col, v * w) for (mid, w) in row_entries(b, row) for
-            (col, v) in row_entries(a, mid)
-        )
+        return ((col, v * w) for (mid, w) in row_entries(b, row) for
+                (col, v) in row_entries(a, mid))
     end
     return LegMap(a.in_dim, b.out_dim, entry, entries)
 end
@@ -164,10 +160,8 @@ function _product_maps(a, b)
     # For a BigInt product row, yield (packed column, exact weight) pairs.
     function entries(row)
         j, i = divrem(row - 1, a.out_dim)
-        return (
-            (x + a.in_dim * (y - 1), v * w) for (y, w) in row_entries(b, j + 1) for
-            (x, v) in row_entries(a, i + 1)
-        )
+        return ((x + a.in_dim * (y - 1), v * w) for (y, w) in row_entries(b, j + 1) for
+                (x, v) in row_entries(a, i + 1))
     end
     return LegMap(src, dst, entry, entries)
 end

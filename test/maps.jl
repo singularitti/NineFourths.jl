@@ -64,10 +64,8 @@ end
     # (i,k,j)=(2,3,1) contributes to X₂₃ Y₃₁ Z₂₁.
     term = 2 + 3 * 2
     @test all(classical.legs[leg][row, term] == 1 for (leg, row) in enumerate((8, 3, 2)))
-    @test all(
-        (term, 1) in NF.row_entries(classical.legs[leg], row) for
-        (leg, row) in enumerate((8, 3, 2))
-    )
+    @test all((term, 1) in NF.row_entries(classical.legs[leg], row) for
+              (leg, row) in enumerate((8, 3, 2)))
     # Each factor supplies an integer triple of tensor leg dimensions.
     dimensions = ((2, 3, 4), (3, 4, 2), (4, 2, 3))
     reordered = NF.permute_factors(
