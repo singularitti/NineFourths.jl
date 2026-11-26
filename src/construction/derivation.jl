@@ -1,22 +1,30 @@
 """
     ShpilkaDerivation(parameters::ShpilkaParameters)
 
-Store the exact `ShpilkaParameters` for the derivation in Theorem 1.2 of Shpilka's
-*Exposition of OpenAI’s Matrix Multiplication in Exponent 9/4
-(and an explicit algorithm)*.
-It starts with the baseline at `(q, q)` and applies Lemma 6.5 at step lengths
-`1, 2, 4, …, 2^(q-1)`.
+Store the exact parameters for the derivation in Shpilka's Theorem 1.2.
+
+The derivation starts with the baseline at `(q, q)` and applies Lemma 6.5
+successively at step lengths `1, 2, 4, …, 2^(q-1)`. See
+`materialize_derivation` for the resulting list of proof entries.
+[Exposition of OpenAI’s Matrix Multiplication in Exponent 9/4 (and an explicit algorithm)](https://eccc.weizmann.ac.il/report/2026/281/).
 """
 struct ShpilkaDerivation
     parameters::ShpilkaParameters
 end
 
 """
-An entry of a materialized derivation. `a` and `b` are `BigInt` polynomial
-lengths, and `value` is an exact `Rational{BigInt}` lower bound on `F(a, b)`.
-`kind` is a rule symbol such as `:baseline` or `:midpoint`. `predecessors`
-is a tuple of `Int` indices into earlier entries of the same derivation.
-Midpoint predecessors are in increasing column order.
+    DerivationNode(a, b, value, kind, predecessors)
+
+Represent one lower bound and its justification in a materialized derivation.
+
+`a` and `b` are `BigInt` polynomial lengths. `value` is an exact
+`Rational{BigInt}` lower bound on `F(a, b)`, the paper's supremum of witness
+rates for the balanced polynomial tensor at those lengths. `kind` is one of
+`:baseline`, `:restriction`, `:symmetry`, `:midpoint`, or `:tripling`.
+
+`predecessors` stores `Int` indices into earlier entries of the same derivation.
+A baseline has no predecessors, a midpoint has two in increasing column
+order, and other rules have one.
 """
 struct DerivationNode
     a::BigInt
@@ -26,18 +34,32 @@ struct DerivationNode
     predecessors::Tuple{Vararg{Int}}
 end
 
-# Append to a collection such as Vector{DerivationNode} supporting push! and
-# length. Supply integer lengths, an exact rational bound, a rule Symbol and
-# a tuple of predecessor indices convertible to Int. Return the new index.
+"""
+    _push_derivation_node!(nodes, a, b, value, kind, predecessors)
+
+Append a `DerivationNode` and return its one-based index.
+
+`nodes` supports `push!` and `length`, as a `Vector{DerivationNode}` does.
+Supply integer lengths, an exact rational bound, a rule symbol, and a tuple
+of predecessor indices convertible to `Int`.
+"""
 function _push_derivation_node!(nodes, a, b, value, kind, predecessors)
     push!(nodes, DerivationNode(a, b, value, kind, predecessors))
     return length(nodes)
 end
 
-# Lemma 6.3 and Claim 6.4. Build the chain of midpoint targets, then emit
-# its steps in dependency order starting from the endpoint or restriction.
-# Use a one-based, appendable collection of DerivationNode entries, an integer
-# start index, an integer distance and a nonnegative integer depth limit.
+"""
+    _extend_row!(nodes, start, distance, depth)
+
+Extend a derivation along one row and return the index at the requested column.
+
+Given `nodes[start]` at `(a,b)`, reach `(a,b + distance)` using Lemma 6.3
+and Claim 6.4. `distance` lies in `1:a+2b`, and `depth` is the nonnegative
+limit on the number of midpoint steps. `nodes` is a one-based, appendable
+collection of `DerivationNode` entries. Build the chain of midpoint targets,
+then append its steps in dependency order, starting from an endpoint or a
+restriction of the original bound.
+"""
 function _extend_row!(nodes, start, distance, depth)
     initial = nodes[start]
     a, b, value = initial.a, initial.b, initial.value
@@ -68,7 +90,7 @@ function _extend_row!(nodes, start, distance, depth)
 end
 
 """
-    materialize_derivation(derivation) -> Vector{DerivationNode}
+    materialize_derivation(derivation)::Vector{DerivationNode}
 
 Generate the proof entries in dependency order with exact dyadic values.
 Use a `ShpilkaDerivation` or another description exposing a positive `Integer`

@@ -1,12 +1,20 @@
 """
-The exact exponent bound `log_base(rank)` from a checked coefficient table.
-`base` is the integer block side (at least two) and `rank` is its product count.
+    RankExponent(base, rank)
+
+Represent the exact exponent bound `log_base(rank)` from a checked coefficient table.
+
+`base` is the integer block side of at least two, and `rank` is the product count.
 """
 struct RankExponent
     base::Int
     rank::Int
 end
 
+"""
+    Base.show(io::IO, exponent::RankExponent)
+
+Print the exponent as a logarithm with its integer base and product count.
+"""
 function Base.show(io::IO, exponent::RankExponent)
     return print(io, "log_", exponent.base, "(", exponent.rank, ")")
 end
@@ -14,14 +22,17 @@ end
 """
     VerificationReport
 
-The result of `verify_scheme`. The symbol `identity` is `:exact_coefficients`
+Report the evidence for a bilinear rule's identity and exponent bound.
+
+The symbol `identity` is `:exact_coefficients`
 after a coefficient-by-coefficient check, `:symbolic_restriction` after a
 construction certificate check, `:failed` for a failed check, or `:unchecked`
 if enumeration exceeds its budget. `exponent` holds a `RankExponent` for
 a verified table with block side at least two, a `Rational{BigInt}` bound
-for a symbolic certificate, or `nothing` when a bound is unavailable. `target` holds the
-requested Shpilka exponent as a `Rational{BigInt}` when present. `valid` is
-`true` when the identity and any requested exponent bound are verified.
+for a symbolic certificate, or `nothing` when a bound is unavailable.
+`target` holds the requested Shpilka exponent as a `Rational{BigInt}` when
+present. `valid` is `true` when the identity and any requested exponent bound
+are verified.
 `diagnostics` contains strings explaining a failed or skipped check.
 """
 struct VerificationReport
@@ -32,40 +43,65 @@ struct VerificationReport
     diagnostics::Vector{String}
 end
 
-# message is a diagnostic string. target is nothing or the requested exact
-# rational exponent. Both are recorded in the failed VerificationReport.
+"""
+    _verification_failure(message; target=nothing)::VerificationReport
+
+Record a failed identity check with a diagnostic string and, when present,
+its requested exact rational exponent.
+"""
 function _verification_failure(message; target=nothing)
     return VerificationReport(false, :failed, nothing, target, [message])
 end
 
 """
-    verify_scheme(scheme::ExplicitScheme; field=nothing) -> VerificationReport
-    verify_scheme(scheme::ShpilkaScheme) -> VerificationReport
+    verify_scheme(scheme::ExplicitScheme; field=nothing)::VerificationReport
 
-Verify the matrix multiplication identity and derive the exponent bound.
-Explicit and lowered schemes are checked on every pair of matrix units in
-exact arithmetic. For an `ExplicitScheme`, `field=nothing` infers the field
-from its scalar coefficients. Supply an exact scalar type, a representative
-element, or a callable parent such as `Nemo.GF(5)` to select it explicitly.
-For Shpilka schemes, the certificate checks the executable derivation and
-restriction recipe against the symbolic copy, degree, and rank bounds in §6
-of Shpilka's exposition. It depends on the algebraic primitives used by the
-compiler and the seed builder.
+Check an explicit rule on all pairs of matrix units in exact arithmetic.
+
+Infer the field from the coefficients with `field=nothing`. Supply an exact
+scalar type, a representative element, or a callable parent such as
+`Nemo.GF(5)` to select it explicitly. A verified rule with block side at least
+two gives an exponent bound from its block side and product count.
+
+See also [`BilinearScheme`](@ref), [`multiplication_scheme`](@ref).
+
+# Examples
+
+```jldoctest
+julia> using NineFourths
+
+julia> scheme = BilinearScheme([2;;], [3;;], [1//6;;]);
+
+julia> verify_scheme(scheme).identity
+:exact_coefficients
+
+julia> verify_scheme(BilinearScheme([2;;], [3;;], [1//5;;])).valid
+false
+```
 """
 function verify_scheme(scheme::ExplicitScheme; field=nothing)
     return _verify_coefficient_tables(scheme.u, scheme.U, scheme.V, scheme.W; field)
 end
 
-# value is a single coefficient. The Boolean result selects built-in exact
-# integers and rationals, PhaseSum weights, and Nemo ZZ, QQ, and QQBar elements.
+"""
+    _verification_rational_or_algebraic(value)::Bool
+
+Identify coefficients handled by the widened characteristic-zero check.
+
+This includes built-in integers and rationals, symbolic phase sums, and Nemo
+elements of `ZZ`, `QQ`, and `QQBar`.
+"""
 function _verification_rational_or_algebraic(value)
     return value isa Union{
         _BuiltinExact,PhaseSum,Nemo.QQBarFieldElem,Nemo.QQFieldElem,Nemo.ZZRingElem
     }
 end
 
-# value is a candidate coefficient or field identity. This rejects array
-# values and known inexact scalar types before checking an exact identity.
+"""
+    _unsupported_verification_scalar(value)::Bool
+
+Identify arrays and known inexact scalars that the exact coefficient check rejects.
+"""
 function _unsupported_verification_scalar(value)
     value isa Union{AbstractFloat,AbstractArray,Nemo.MatElem,Nemo.MatRingElem} &&
         return true
@@ -73,8 +109,15 @@ function _unsupported_verification_scalar(value)
     return value isa Nemo.RingElem && !Nemo.is_exact_type(typeof(value))
 end
 
-# options is the NamedTuple from _field_configuration. Convert the scalar
-# coefficient value, which can include a symbolic phase, into its exact domain.
+"""
+    _native_verification_scalar(options, value)
+
+Embed a coefficient in the exact field configured by `_field_configuration`.
+
+Symbolic and concrete algebraic coefficients can supply algebraic values in
+`QQBar`, Gaussian rationals in a complex field, or rational values that embed
+in the selected field.
+"""
 function _native_verification_scalar(options, value)
     if value isa Union{PhaseSum,Nemo.QQBarFieldElem}
         if options.one isa Nemo.QQBarFieldElem
@@ -90,9 +133,15 @@ function _native_verification_scalar(options, value)
     return _field_embed_native(options, value)
 end
 
-# tables is a triple of matrices or two-dimensional scalar iterators from
-# _verification_entries. field is nothing, an exact scalar type, a representative
-# element, or a callable parent. Return the converted tables, field zero, and field one.
+"""
+    _verification_coefficients(tables, field) -> (coefficients, zero_value, one_value)
+
+Normalize three coefficient tables and obtain the identities of their exact field.
+
+Infer or supply `field` as in [`verify_scheme`](@ref). The input tables can
+also be two-dimensional iterators of scalar entries. Widen built-in rational
+arithmetic and narrow Gaussian coefficients when needed to preserve exactness.
+"""
 function _verification_coefficients(tables, field)
     if isnothing(field) && all(T -> all(_verification_rational_or_algebraic, T), tables)
         zero_value = zero(Rational{BigInt})
@@ -136,18 +185,35 @@ function _verification_coefficients(tables, field)
     return converted, zero_value, one_value
 end
 
-# Julia arrays can preserve their storage when mapped to exact scalars.
+"""
+    _verification_entries(table::AbstractMatrix)
+
+Use a Julia matrix as the iterable of coefficient entries.
+"""
 _verification_entries(table::AbstractMatrix) = table
 
-# For a one-based matrix-like table, use its integer dimensions and scalar
-# table[row, term] reads to return a two-dimensional generator of coefficients.
+"""
+    _verification_entries(table)
+
+Iterate the scalar entries of a one-based matrix-like table in column-major order.
+
+Return a two-dimensional generator using the dimensions from `size(table)`
+and scalar `table[row, term]` reads.
+"""
 function _verification_entries(table)
     rows, terms = size(table)
     return (table[row, term] for row in 1:rows, term in 1:terms)
 end
 
-# u is the positive integer block side. U, V and W are one-based u²-by-rank
-# tables of scalar weights. field supplies the optional exact domain as in verify_scheme.
+"""
+    _verify_coefficient_tables(u, U, V, W; field=nothing)::VerificationReport
+
+Validate the shapes and exact field of three coefficient tables and check their identity.
+
+For positive integer block side `u`, all three tables have `u²` rows and one
+column per product. Supply an exact domain through `field` as in
+[`verify_scheme`](@ref).
+"""
 function _verify_coefficient_tables(u, U, V, W; field=nothing)
     dimensions = size(U)
     if u < 1 ||
@@ -181,8 +247,14 @@ function _verify_coefficient_tables(u, U, V, W; field=nothing)
     end
 end
 
-# For integer side u, the triple (U, V, W) holds one coefficient matrix per leg.
-# Their entries and the scalar identities zero_value and one_value share an exact domain.
+"""
+    _check_matrix_unit_coefficients(u, (U, V, W), zero_value, one_value)::VerificationReport
+
+Contract the coefficient tables on each pair of matrix units of side `u`.
+
+Use the supplied scalar identities in the common field of the entries.
+Report the first coefficient that differs from matrix multiplication.
+"""
 function _check_matrix_unit_coefficients(u, (U, V, W), zero_value, one_value)
     entries, rank = size(U)
     coordinates = CartesianIndices((Int(u), Int(u)))
@@ -211,13 +283,14 @@ function _check_matrix_unit_coefficients(u, (U, V, W), zero_value, one_value)
 end
 
 """
-    verify_scheme(scheme::LoweredScheme; max_terms=1_000_000) -> VerificationReport
+    verify_scheme(scheme::LoweredScheme; max_terms=1_000_000)::VerificationReport
 
-Read the exact coefficient maps used by `multiply` and check the resulting
-matrix multiplication tensor. `max_terms` is a nonnegative integer budget for
-the number of table entries and potential rank summands. Each coefficient can
-require additional work to contract its restriction row with the seed. If the
-bound prevents enumeration, the report has `identity == :unchecked`.
+Check the matrix multiplication tensor from the exact coefficients of a lowered rule.
+
+`max_terms` bounds the number of table entries and potential rank summands.
+Each coefficient can require additional work to contract its restriction row
+with the seed. If the bound prevents enumeration, the report has
+`identity == :unchecked`.
 """
 function verify_scheme(scheme::LoweredScheme; max_terms::Integer=1_000_000)
     max_terms >= 0 ||
@@ -251,14 +324,20 @@ function verify_scheme(scheme::LoweredScheme; max_terms::Integer=1_000_000)
     return _verify_coefficient_tables(u, tables...)
 end
 
-# Compare the stored factor pair with an integer coefficient and a nonnegative
-# integer exponent of two.
+"""
+    _is_scaled_power(value::ScaledPowerOfTwo, coefficient, exponent)::Bool
+
+Check a factored power of two against the expected coefficient and exponent.
+"""
 function _is_scaled_power(value::ScaledPowerOfTwo, coefficient, exponent)
     return value.coefficient == coefficient && value.exponent == exponent
 end
 
-# For a materialized integer value (usually BigInt), check the coefficient and exponent
-# from its bit length and trailing zeros.
+"""
+    _is_scaled_power(value::Integer, coefficient, exponent)::Bool
+
+Check an integer against a factored power of two using its bit length and trailing zeros.
+"""
 function _is_scaled_power(value::Integer, coefficient, exponent)
     value > 0 || return false
     ndigits(value; base=2) == exponent + ndigits(coefficient; base=2) || return false
@@ -266,6 +345,18 @@ function _is_scaled_power(value::Integer, coefficient, exponent)
     return trailing_zeros(value) >= shift && (value >> shift) == coefficient
 end
 
+"""
+    verify_scheme(scheme::ShpilkaScheme)::VerificationReport
+
+Check the executable construction and exponent certificate for a Shpilka rule.
+
+Verify the derivation recipe and the symbolic copy, degree, and rank bounds
+from §6 of Shpilka's exposition. The resulting identity status is
+`:symbolic_restriction`. The certificate relies on the algebraic primitives
+of the compiler and seed builder.
+
+See also [`multiplication_scheme`](@ref).
+"""
 function verify_scheme(scheme::ShpilkaScheme)
     parameters = scheme.derivation.parameters
     target = parameters.target

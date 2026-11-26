@@ -130,9 +130,9 @@ their conversion to matrix multiplication algorithms. [OpenAI, *An Upper Bound o
 
 ## Questions and contributions
 
-Describe arguments, callbacks, and stored values by their intended Julia types
-and the operations they need. Put this information in the existing docstring.
-For a definition without a docstring, put a short comment immediately above it.
+Write Julia docstrings for public and internal functions and types. Give the
+calling signature and describe the operations required of arguments, callbacks,
+and stored values. Document locally scoped callbacks next to their definitions.
 Use argument annotations when they select an implementation or enforce a
 mathematical requirement, such as an integer tensor power.
 
@@ -141,5 +141,5 @@ You can post usage questions on
 
 We welcome contributions, feature requests, and suggestions. If you encounter any problems,
 please open an [issue](https://github.com/singularitti/NineFourths.jl/issues).
-The [Contributing](@ref) page has
-a few guidelines that should be followed when opening pull requests and contributing code.
+The contributor guide covers local builds, tests, and pull requests.
+[Contributing](docs/src/developers/contributing.md)

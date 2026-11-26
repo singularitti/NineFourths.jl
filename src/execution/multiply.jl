@@ -1,5 +1,10 @@
-# Allocate a Matrix{T} of nonnegative integer dimensions m×n. zero_value is
-# an additive identity convertible to T, or nothing for an empty result.
+"""
+    _zero_matrix(T::Type, m, n, zero_value)::Matrix{T}
+
+Allocate an `m×n` matrix of element type `T` filled with `zero_value`.
+
+Pass an additive identity convertible to `T`. Use `nothing` for an empty matrix.
+"""
 function _zero_matrix(::Type{T}, m, n, zero_value) where {T}
     C = Matrix{T}(undef, m, n)
     isempty(C) && return C
@@ -8,9 +13,14 @@ function _zero_matrix(::Type{T}, m, n, zero_value) where {T}
     return fill!(C, zero_value)
 end
 
-# A and B are one-based m×k and k×n matrices. The result is a Matrix{T}
-# initialized with the scalar zero_value. The add and product callbacks each
-# take two entries and return a scalar or a FieldPhaseSum work value.
+"""
+    _classical_product(A, B, zero_value, T, add=+, product=*)
+
+Multiply two one-based matrices using conventional dot products.
+
+Initialize each accumulation with `zero_value` and store the result in a `Matrix{T}`.
+The binary `add` and `product` callbacks can operate on scalar or phase work values.
+"""
 function _classical_product(A, B, zero_value, T, add=+, product=*)
     C = _zero_matrix(T, size(A, 1), size(B, 2), zero_value)
     for column in axes(B, 2), k in axes(A, 2)
@@ -22,10 +32,17 @@ function _classical_product(A, B, zero_value, T, add=+, product=*)
     return C
 end
 
-# Accumulate an input linear form from the one-based source matrix into a
-# Matrix{Any} of child-block size. The domain is from _field_inputs. The term
-# and leg select an input form (leg 1 or 2), side is the scheme's block-grid side,
-# and the active dimensions count block rows and columns containing entries.
+"""
+    _accumulate_form!(form, source, scheme, domain, term, leg, side,
+                      active_rows, active_columns)
+
+Add one scheme input form from `source` to the one-based child buffer `form`.
+
+Select the left or right input form of `term` with `leg` equal to 1 or 2. The
+square block grid has side `side`, and the active dimensions count the block
+rows and columns containing source entries. Blocks beyond the source index
+ranges contribute zero. The scalar `domain` comes from `_field_inputs`.
+"""
 function _accumulate_form!(
     form, source, scheme, domain, term, leg, side, active_rows, active_columns
 )
@@ -49,9 +66,15 @@ function _accumulate_form!(
     return nothing
 end
 
-# Accumulate a child product Matrix{Any} into the parent output C::Matrix{Any}.
-# The domain is from _field_inputs. The integer term selects an output weight,
-# side is the block-grid side, and the active dimensions count output blocks.
+"""
+    _accumulate_product!(C, product, scheme, domain, term, side,
+                         active_rows, active_columns)
+
+Add `product` to the output `C` using the reconstruction weights for `term`.
+
+Update the active block rows and columns of the grid of side `side`. The scalar
+`domain` comes from `_field_inputs`. Trim each block to the output index ranges.
+"""
 function _accumulate_product!(
     C, product, scheme, domain, term, side, active_rows, active_columns
 )
@@ -74,10 +97,16 @@ function _accumulate_product!(
     return nothing
 end
 
-# A and B are one-based matrices of field scalars or FieldPhaseSum work values.
-# The domain is from _field_inputs and zero_value is its additive identity.
-# The integers side and rank give the scheme's block-grid side and term count.
-# Child input forms and the returned product use Matrix{Any} for work values.
+"""
+    _scheme_product(A, B, scheme, domain, zero_value, side, rank)
+
+Multiply two one-based matrices using one scheme layer and any admissible child layers.
+
+The layer uses `rank` terms and a block grid of side `side`. It constructs child
+input forms in the selected `domain` and uses conventional multiplication when
+the child dimensions reach the recursion limit. The returned `Matrix{Any}` can
+hold native scalars and formal phase work values pending output conversion.
+"""
 function _scheme_product(A, B, scheme, domain, zero_value, side, rank)
     m, k = size(A)
     n = size(B, 2)
@@ -104,11 +133,21 @@ function _scheme_product(A, B, scheme, domain, zero_value, side, rank)
     return C
 end
 
-# Multiply built-in integer or rational scalars after widening the left factor.
+"""
+    _wide_product(a, b)
+
+Multiply built-in integer or rational scalars after widening the left factor.
+"""
 _wide_product(a, b) = big(a) * b
 
-# Use the one-based matrices and scalar zero from _field_inputs. Its legacy
-# flag selects widened integer or rational arithmetic for inferred exact inputs.
+"""
+    _classical_fallback(inputs)
+
+Use conventional multiplication on the normalized factors from `_field_inputs`.
+
+Widen scalar products for inferred built-in integers and rationals. Other fields
+use their native addition and multiplication.
+"""
 function _classical_fallback(inputs)
     product = inputs.legacy ? _wide_product : (*)
     return _classical_product(
@@ -117,42 +156,71 @@ function _classical_fallback(inputs)
 end
 
 """
-    multiply(A, B, scheme; fallback=:error, field=nothing,
-             max_coefficient_visits=10_000_000, max_workspace_entries=10_000_000)
+    multiply(A, B, scheme; <keyword arguments>)::Matrix
 
-Multiply an `m×k` matrix by a `k×n` matrix and return a dense Julia `Matrix`.
-`A` and `B` can be Julia `AbstractMatrix` values, Nemo matrices, or other
-containers that supply integer dimensions through `size(M)` and scalar entries
-through `M[i, j]`. The size is typically a `Tuple{Int,Int}`. The index ranges
-come from `axes(M)`, which defaults to one-based indices on each axis. The
-executor uses `eltype(M)` and the entries to infer the input field.
-
-The package's constructors return a `BilinearScheme`. A custom scheme can
-implement `NineFourths.execution_dimensions(scheme, max_side, max_rank)`,
-returning a positive integer pair `(side, rank)` within the limits or
-`nothing`. `NineFourths.scheme_coefficient(scheme, term, leg, coordinate)`
-supplies each scalar weight for one-based integer term and block coordinate
-indices. Legs 1 and 2 denote the input forms and leg 3 denotes the output
-weights. `NineFourths.block_side(scheme)` supplies the block side used in
-diagnostics. Package schemes can represent that side as a symbolic `WitnessSide`.
-
-With the default `field=nothing`, built-in Julia integer inputs produce
-`Matrix{BigInt}` and their rational counterparts produce `Matrix{Rational{BigInt}}`.
-Other inputs use their common scalar field. To supply the field explicitly,
-pass a parent callable as `field(0)` and `field(1)`, a scalar type with
-identities, or a representative element.
+Multiply an `m×k` matrix by a `k×n` matrix using a bilinear scheme.
 
 For positive dimensions the default requires at least one bilinear scheme
 layer. The product uses implicit zero padding along each axis and conventional
-multiplication at the leaves. The `fallback` keyword accepts either the default
-`:error` or `:classical`, which permits a conventional product when the requested
-scheme cannot execute in the input field or budgets. A zero dimension determines
-an empty or zero result directly.
+multiplication at the leaves. A zero dimension determines an empty or zero
+matrix directly.
 
-Both budgets are nonnegative integers. The visit budget bounds the coefficient
-visits across the recursive product. The workspace budget bounds live dense
-matrix entries, including normalized inputs and the result. The workspace budget
-also applies to classical fallback.
+With the default `field=nothing`, built-in Julia integer inputs produce
+`Matrix{BigInt}`. Built-in rational inputs, including mixtures with built-in
+integers, produce `Matrix{Rational{BigInt}}`. Other inputs use their common
+scalar domain. All results are dense Julia matrices.
+
+# Arguments
+
+  - `fallback=:error` requires the scheme. Use `:classical` to permit a conventional
+    product when the scheme exceeds its execution bounds or a coefficient cannot act
+    in the selected domain.
+  - `field=nothing` infers the scalar domain from the input. Supply a parent callable
+    as `field(0)` and `field(1)`, a scalar type with identities, or a representative
+    element to select it explicitly.
+  - `max_coefficient_visits::Integer=10_000_000` bounds coefficient reads across the
+    recursive product.
+  - `max_workspace_entries::Integer=10_000_000` bounds live dense entries, including
+    normalized inputs and the result. It also applies to a conventional product.
+
+Both budgets must be nonnegative.
+
+See also [`BilinearScheme`](@ref), [`multiplication_scheme`](@ref), and
+[`verify_scheme`](@ref).
+
+# Examples
+
+```jldoctest
+julia> using NineFourths
+
+julia> scalar_rule = BilinearScheme([1;;], [1;;], [1;;]);
+
+julia> C = multiply([1 2 3; 4 5 6], [1 0; 0 1; 1 1], scalar_rule);
+
+julia> (eltype(C), C == [4 5; 10 11])
+(BigInt, true)
+
+julia> paper_rule = multiplication_scheme();
+
+julia> C = multiply([2;;], [3;;], paper_rule; fallback=:classical, field=Float32);
+
+julia> (eltype(C), only(C) == 6)
+(Float32, true)
+```
+
+# Implementation
+
+`A` and `B` can be Julia `AbstractMatrix` values, Nemo matrices, or other
+containers with integer dimensions from `size(M)` and scalar entries from
+`M[i, j]`. `axes(M)` supplies the index ranges and defaults to one-based
+axes. Field inference uses `eltype(M)` and the entries.
+
+A custom scheme supplies `NineFourths.execution_dimensions(scheme, max_side, max_rank)`, returning a positive `(side, rank)` pair within the limits or
+`nothing`. `NineFourths.scheme_coefficient(scheme, term, leg, coordinate)`
+supplies weights for one-based term and column-major block indices. Legs 1 and
+2 address the input forms, and leg 3 addresses the output weights.
+`NineFourths.block_side(scheme)` supplies the block side for diagnostics. The
+Shpilka scheme can report a symbolic `WitnessSide`.
 """
 function multiply(
     A,

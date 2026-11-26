@@ -1,20 +1,43 @@
-# Cyclotomic work values keep their weights in the input field. The phase keys
-# have the same half-turn normalization as PhaseSum. Distinct keys may still
-# satisfy cyclotomic relations, so the sparse zero test is conservative.
+"""
+    _FieldPhaseTerms
+
+Dictionary from normalized `Rational{BigInt}` phases to weights in the
+working scalar domain. Phases use the half-turn convention of [`PhaseSum`](@ref).
+"""
 const _FieldPhaseTerms = Dict{Rational{BigInt},Any}
 
-# Store rational phase keys and scalar weights with their field's additive identity.
+"""
+    FieldPhaseSum(terms, zero_value)
+
+Store a normalized phase dictionary and the additive identity of its working
+scalar domain. This representation keeps arithmetic on the weights in that
+domain while formal roots of unity supply the phases. Distinct phases can
+still satisfy cyclotomic relations.
+"""
 struct FieldPhaseSum
     terms::_FieldPhaseTerms
     zero_value
 end
 
-# Test a field scalar or FieldPhaseSum against the field's scalar zero.
 _field_iszero(value, zero_value) = value == zero_value
 _field_iszero(value::FieldPhaseSum, zero_value) = isempty(value.terms)
 
-# Add a rational phase and its scalar weight to a _FieldPhaseTerms dictionary.
-# The zero_value is the additive identity of the weight's field.
+"""
+    _field_iszero(value, zero_value)::Bool
+
+Compare a scalar with its field's additive identity. For a [`FieldPhaseSum`](@ref),
+test whether its dictionary is empty. A nonempty dictionary can still vanish
+through cancellation between different phases.
+"""
+_field_iszero
+
+"""
+    _add_field_phase!(terms, phase, weight, zero_value)
+
+Add a `weight` to a mutable [`_FieldPhaseTerms`](@ref) dictionary. Normalize
+the rational phase to `[0, 1/2)` and adjust the weight's sign before adding.
+Remove a term when its weight equals the field's `zero_value`. Return `nothing`.
+"""
 function _add_field_phase!(terms, phase, weight, zero_value)
     phase = mod(phase, 1)
     if phase >= 1 // 2
@@ -32,17 +55,27 @@ function _add_field_phase!(terms, phase, weight, zero_value)
     return nothing
 end
 
-# Collapse _FieldPhaseTerms with only a constant term to a scalar. Use the
-# supplied scalar zero for no terms and a FieldPhaseSum for other maps.
+"""
+    _finish_field_phases(terms, zero_value)
+
+Finish a normalized phase sum. Return the supplied zero for an empty
+dictionary, the scalar weight for a lone constant term, or a
+[`FieldPhaseSum`](@ref) for other dictionaries.
+"""
 function _finish_field_phases(terms, zero_value)
     isempty(terms) && return zero_value
     length(terms) == 1 && haskey(terms, 0) && return terms[0]
     return FieldPhaseSum(terms, zero_value)
 end
 
-# coefficient.terms yields (phase, weight) pairs as in a PhaseSum. The embed
-# callback maps each Rational{BigInt} weight to a scalar in the target field,
-# whose additive identity is zero_value.
+"""
+    _field_phase_coefficient(embed, coefficient, zero_value=embed(big(0) // 1))
+
+Embed a [`PhaseSum`](@ref) coefficient's `Rational{BigInt}` weights using
+the callable `embed`. Keep the original phases and drop terms whose embedded
+weights equal `zero_value`. The result is a working scalar or a
+[`FieldPhaseSum`](@ref).
+"""
 function _field_phase_coefficient(embed, coefficient, zero_value=embed(big(0) // 1))
     terms = _FieldPhaseTerms()
     for (phase, weight) in coefficient.terms
@@ -51,7 +84,6 @@ function _field_phase_coefficient(embed, coefficient, zero_value=embed(big(0) //
     return _finish_field_phases(terms, zero_value)
 end
 
-# Add two work values, each a scalar or FieldPhaseSum over the same field.
 _field_add(left, right) = left + right
 
 # A scalar right operand contributes a weight at phase zero.
@@ -71,7 +103,15 @@ function _field_add(left::FieldPhaseSum, right::FieldPhaseSum)
     return _finish_field_phases(terms, left.zero_value)
 end
 
-# Multiply two work values, each a scalar or FieldPhaseSum over the same field.
+"""
+    _field_add(left, right)
+
+Add two working values in the same scalar domain. Scalars add directly.
+When either operand is a [`FieldPhaseSum`](@ref), treat each scalar as a
+constant term and combine weights at equal phases.
+"""
+_field_add
+
 _field_mul(left, right) = left * right
 
 # A scalar right operand multiplies each phase weight.
@@ -96,11 +136,31 @@ function _field_mul(left::FieldPhaseSum, right::FieldPhaseSum)
     return _finish_field_phases(terms, left.zero_value)
 end
 
-# Apply a work coefficient to a work value, both scalars or FieldPhaseSum objects.
+"""
+    _field_mul(left, right)
+
+Multiply two working values in the same scalar domain. Scalars multiply
+directly, a scalar with a [`FieldPhaseSum`](@ref) scales each phase weight,
+and two phase sums combine all phase pairs by addition of phases and
+multiplication of weights.
+"""
+_field_mul
+
+"""
+    _field_apply(coefficient, value)
+
+Apply a scalar or symbolic scheme coefficient to a working value using
+[`_field_mul`](@ref). Both operands use the same working scalar domain.
+"""
 _field_apply(coefficient, value) = _field_mul(coefficient, value)
 
-# Factor a positive integer order. Return its BigInt prime divisors if the
-# order is squarefree, or nothing if a prime factor occurs more than once.
+"""
+    _squarefree_prime_factors(order)
+
+Factor a positive integer `order` with Nemo. Return its prime divisors as a
+`Vector{BigInt}` when it is squarefree, or `nothing` when a factor repeats.
+The order one has an empty factor list.
+"""
 function _squarefree_prime_factors(order)
     primes = BigInt[]
     for (prime, power) in Nemo.factor(Nemo.ZZ(order))
@@ -110,14 +170,20 @@ function _squarefree_prime_factors(order)
     return primes
 end
 
-# Project onto the constant power-basis coefficient in the prime-power
-# cyclotomic rings and tensor those projections across coprime orders.
-# The projections agree when extending a prime-power order. A primitive
-# p^a-th root has constant coefficient zero for a > 1. For a = 1, the
-# coefficient is −1 for exponent p−1. The Chinese remainder theorem gives
-# that exponent exactly when n ≡ −(d/p) mod p for a phase n/d.
-# The phase is Rational{BigInt}. The factors cache maps BigInt orders to
-# Vector{BigInt} prime factors or nothing. Return an Int sign in -1:1.
+"""
+    _constant_phase_sign(phase, factors)::Int
+
+Return the coefficient in `-1:1` obtained by projecting
+`exp(2πim * phase)` onto the constant term. Tensor the power-basis
+projections of the prime-power cyclotomic rings for the reduced denominator
+of `phase`. The `factors` cache maps `BigInt` root orders to the results of
+[`_squarefree_prime_factors`](@ref).
+
+A primitive root of order `p^k` has constant coefficient zero for `k > 1`.
+For `k = 1`, the coefficient is `-1` at exponent `p - 1`. For a phase `n/d`,
+the Chinese remainder theorem gives that exponent precisely when
+`n ≡ -(d ÷ p) mod p`.
+"""
 function _constant_phase_sign(phase, factors)
     order = denominator(phase)
     order == 1 && return 1
@@ -128,7 +194,6 @@ function _constant_phase_sign(phase, factors)
     return isodd(length(primes)) ? -1 : 1
 end
 
-# Return a scalar unchanged or project a FieldPhaseSum to a scalar of its field.
 _project_field_value(value) = value
 
 function _project_field_value(value::FieldPhaseSum)
@@ -142,11 +207,24 @@ function _project_field_value(value::FieldPhaseSum)
     return result
 end
 
-# On a Julia complex field the formal fourth root acts as the native i.
-# If f is the integer-linear projection above, f(z) + i*f(-i*z) commutes
-# with multiplication by i and fixes the Gaussian scalars.
-# value supplies rational phase keys, weights, and a zero_value as in a
-# FieldPhaseSum over Complex scalars. The projection returns a Complex scalar.
+"""
+    _project_field_value(value)
+
+Return an ordinary working scalar unchanged. For a [`FieldPhaseSum`](@ref),
+apply the integer-linear constant-term projection and return its scalar
+value. This projection fixes scalar terms and selects a component from a
+general symbolic sum.
+"""
+_project_field_value
+
+"""
+    _project_complex_value(value)
+
+Project a [`FieldPhaseSum`](@ref) with Julia `Complex` weights into its
+complex scalar domain. Here the formal fourth root acts as the native
+imaginary unit. If `f` is the constant-term projection, `f(z) + im*f(-im*z)`
+commutes with multiplication by `im` and fixes Gaussian scalars.
+"""
 function _project_complex_value(value)
     factors = Dict{BigInt,Union{Nothing,Vector{BigInt}}}()
     result = value.zero_value

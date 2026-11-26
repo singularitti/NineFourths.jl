@@ -1,10 +1,29 @@
-# A custom execution fixture with one scalar product and unit `Int` weights.
+"""
+    TestScalarScheme()
+
+Exercise the custom scheme interface with one scalar product of unit weight.
+"""
 struct TestScalarScheme end
 
+"""
+    NineFourths.block_side(::TestScalarScheme)
+
+Use scalar blocks of side one.
+"""
 NineFourths.block_side(::TestScalarScheme) = 1
-# `term` and `coordinate` are integer indices equal to 1. `leg` is 1, 2, or 3.
+
+"""
+    NineFourths.scheme_coefficient(::TestScalarScheme, term, leg, coordinate)
+
+Return `1` as an `Int` for each of the three legs of the single term and coordinate.
+"""
 NineFourths.scheme_coefficient(::TestScalarScheme, term, leg, coordinate) = 1
-# Integer limits on block side and rank yield `(side, rank)` or `nothing`.
+
+"""
+    NineFourths.execution_dimensions(::TestScalarScheme, max_side, max_rank)
+
+Return `(1, 1)` if both limits permit the scalar scheme, or `nothing` otherwise.
+"""
 function NineFourths.execution_dimensions(::TestScalarScheme, max_side, max_rank)
     return min(max_side, max_rank) >= 1 ? (1, 1) : nothing
 end

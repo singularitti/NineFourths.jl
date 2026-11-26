@@ -1,16 +1,30 @@
-# The symbolic target is field-independent. At execution time every Fourier
-# order and interpolation denominator must be invertible in the input field.
-# The admissible callback accepts a positive integer order and returns Bool.
-# Schemes without a field-dependent construction are already specialized.
+"""
+    _specialize_scheme(scheme, admissible)
+
+Prepare `scheme` for the scalar domain identified by `admissible`.
+
+The callback accepts a positive integer order and reports whether it is usable
+in that domain. Return `scheme` unchanged when it has no field-dependent construction.
+"""
 _specialize_scheme(scheme, admissible) = scheme
 
-# Lower a symbolic ShpilkaScheme using the integer-to-Bool admissibility test.
+"""
+    _specialize_scheme(scheme::ShpilkaScheme, admissible)
+
+Lower a symbolic scheme by selecting admissible Fourier and interpolation orders.
+"""
 function _specialize_scheme(s::ShpilkaScheme, admissible)
     return lower_scheme(s; admissible_order=admissible)
 end
 
-# Rebuild a LoweredScheme for the admissible Fourier orders. The optional
-# WitnessRecipe carries the construction inputs needed to rebuild its witness.
+"""
+    _specialize_scheme(scheme::LoweredScheme, admissible)
+
+Rebuild the polynomial seed and any nonbaseline witness for admissible orders.
+
+Use the witness's stored recipe when it records a nonbaseline construction.
+Reuse the witness when the recipe is absent or the witness is a baseline restriction.
+"""
 function _specialize_scheme(s::LoweredScheme, admissible)
     recipe = s.witness.recipe
     a, b, _ = size(s.seed.polynomial)
@@ -30,24 +44,41 @@ function _specialize_scheme(s::LoweredScheme, admissible)
     return LoweredScheme(seed, witness)
 end
 
-# Pair an executable scheme with its domain, the field configuration and
-# normalized matrices returned by _field_inputs.
+"""
+    _scheme_arithmetic(scheme, inputs) -> (scheme, domain)
+
+Pair a specialized executable scheme with the domain from `_field_inputs`.
+
+Determine admissible orders from their integer embeddings in the selected domain.
+"""
 function _scheme_arithmetic(scheme, inputs)
     # Return whether an integer order is invertible in the selected scalar field.
     admissible(order) = _field_unit_integer(inputs.one, order)
     return (; scheme=_specialize_scheme(scheme, admissible), domain=inputs)
 end
 
-# The field is the _field_configuration named tuple, with or without the input
-# matrices. Embed a scheme coefficient as a scalar or FieldPhaseSum work value.
+"""
+    _scheme_weight(field, value::PhaseSum)
+
+Embed the rational weights of a formal phase sum in the selected domain.
+
+Return a native scalar when the phase sum simplifies to one, or a `FieldPhaseSum`.
+"""
 function _scheme_weight(field, value::PhaseSum)
     return _field_phase_coefficient(
         weight -> _field_rational(field.one, weight), value, field.zero
     )
 end
 
-# field is the configuration record. A QQBar weight may be rational,
-# Gaussian rational, or a native element of its algebraic coefficient field.
+"""
+    _scheme_weight(field, value::Nemo.QQBarFieldElem)
+
+Embed an algebraic coefficient in the domain described by `field`.
+
+Embed rational values through the rational method. Keep other values algebraic
+for inferred Julia exact arithmetic. For a complex exact domain, require rational
+real and imaginary components. Other domains use native coefficient embedding.
+"""
 function _scheme_weight(field, value::Nemo.QQBarFieldElem)
     Nemo.is_rational(value) && return _scheme_weight(field, rational_result(value))
     field.legacy && return value
@@ -62,20 +93,33 @@ function _scheme_weight(field, value::Nemo.QQBarFieldElem)
     return _field_embed_native(field, value)
 end
 
-# Embed the scalar weight value in the domain described by the field configuration.
+"""
+    _scheme_weight(field, value)
+
+Embed a scalar coefficient using the configuration returned by `_field_configuration`.
+"""
 _scheme_weight(field, value) = _field_embed_native(field, value)
 
-# scheme is a BilinearScheme or supplies scheme_coefficient, and field is the
-# field configuration. The integer indices identify the one-based term, leg
-# (1, 2, or 3), and block coordinate.
+"""
+    _field_coefficient(field, scheme, term, leg, coordinate)
+
+Read and embed a scheme coefficient in the execution domain.
+
+The indices are one-based. Legs 1 and 2 address the left and right input forms,
+and leg 3 addresses the output weights. Blocks use column-major coordinates.
+"""
 function _field_coefficient(field, scheme, term, leg, coordinate)
     return _scheme_weight(field, scheme_coefficient(scheme, term, leg, coordinate))
 end
 
-# A supplied algebraic-number coefficient can belong to the same concrete
-# number field as a symbolic root. Evaluate them with a consistent embedding.
-# value.terms supplies (phase, weight) pairs as in a FieldPhaseSum. Its weights
-# embed in Nemo's algebraic closure of the rationals. Return a Nemo.QQBarFieldElem.
+"""
+    _concrete_algebraic_value(value)::Nemo.QQBarFieldElem
+
+Evaluate formal phase terms in Nemo's algebraic closure of the rationals.
+
+Use a consistent embedding for roots of unity and algebraic weights. Each pair
+in `value.terms` supplies one phase and a weight that embeds in the closure.
+"""
 function _concrete_algebraic_value(value)
     result = ALGEBRAIC_NUMBERS(0)
     for (phase, weight) in value.terms
@@ -85,8 +129,13 @@ function _concrete_algebraic_value(value)
     return result
 end
 
-# Convert a scalar or FieldPhaseSum work value to the output eltype in the
-# field configuration. The legacy flag selects inferred exact Julia arithmetic.
+"""
+    _field_result(field, value)
+
+Convert a native scalar or a formal phase work value to the output element type.
+
+Resolve any phases in the selected scalar domain before converting to `field.eltype`.
+"""
 function _field_result(field, value)
     if value isa FieldPhaseSum
         if field.one isa Nemo.QQBarFieldElem ||

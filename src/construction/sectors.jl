@@ -1,11 +1,29 @@
 # Claim 6.6, with all six orientations in the order used by the balanced seed.
 
-# B_X uses the column index, B_Y the row index, and B_Z the
-# contraction index. Their two copies form the two digits of each index.
-# This NTuple{3,NTuple{2,Int}} gives the ordered legs of the two indices.
+"""
+    _SECTOR_DOT_LEGS
+
+Map each balanced leg's two matrix axes to the legs shared by their dot factors.
+
+`B_X` uses the column index, `B_Y` the row index, and `B_Z` the contraction
+index. The axes on legs 1, 2 and 3 are ordered as (row, contraction),
+(contraction, column) and (row, column), respectively. Each axis combines
+the digits from two orientations.
+"""
 const _SECTOR_DOT_LEGS = ((2, 3), (3, 1), (2, 1))
 
-# K is the number of sectors, two for a midpoint or three for a tripling.
+"""
+    SectorTransition{K}
+    SectorTransition(a::BigInt, b::BigInt, shift::BigInt, sector_type::SectorType{K})
+    SectorTransition{K}(a, b, shift, sector_type)
+
+Store the lengths, shift and fixed type class for the two stages of Claim 6.6.
+
+`K` is two for a midpoint and three for a tripling. In a midpoint,
+`b` is the source second-input length. In a tripling, `b` is the child
+second-input length and `shift` is zero. Use `midpoint_transition` or
+`tripling_transition` to validate the lengths and sector counts.
+"""
 struct SectorTransition{K}
     a::BigInt
     b::BigInt
@@ -13,29 +31,57 @@ struct SectorTransition{K}
     sector_type::SectorType{K}
 end
 
-# Positive integer lengths a and b, shift 1 ≤ s < b, and j of N copies in
-# the shorter sector define a SectorTransition{2}.
+"""
+    midpoint_transition(a::Integer, b::Integer, s::Integer, j::Integer, N::Integer)
+
+Build a midpoint transition from `C(a,b)` to sectors of lengths `b-s` and `b+s`.
+
+Require `a ≥ 1`, `1 ≤ s < b`, and `N ≥ 1`. Assign `j` copies to the
+shorter sector and `N-j` to the longer sector.
+"""
 function midpoint_transition(a::Integer, b::Integer, s::Integer, j::Integer, N::Integer)
     a >= 1 && 1 <= s < b && N >= 1 && 0 <= j <= N ||
         throw(ArgumentError("invalid midpoint dimensions or sector counts"))
     return SectorTransition(big(a), big(b), big(s), SectorType((j, big(N) - j)))
 end
 
-# Positive integer lengths a and b and three nonnegative integer counts
-# j0, j1 and j2, whose sum is positive, define a SectorTransition{3}.
+"""
+    tripling_transition(a::Integer, b::Integer, j0::Integer, j1::Integer, j2::Integer)
+
+Build a three-sector transition from `C(a,3b+a-1)` to sectors based on `C(a,b)`.
+
+Require positive lengths and nonnegative counts with a positive sum.
+Assign `j0`, `j1` and `j2` copies to the left, middle and right sectors
+in that order.
+"""
 function tripling_transition(a::Integer, b::Integer, j0::Integer, j1::Integer, j2::Integer)
     a >= 1 && b >= 1 && big(j0) + j1 + j2 >= 1 ||
         throw(ArgumentError("invalid tripling dimensions or sector counts"))
     return SectorTransition(big(a), big(b), big(0), SectorType((j0, j1, j2)))
 end
 
-# A SectorTransition with two sectors is a midpoint transition.
+"""
+    _is_midpoint(::SectorTransition{K}) where {K}
+
+Return whether the transition has the two midpoint sectors.
+"""
 _is_midpoint(::SectorTransition{K}) where {K} = K == 2
 
-# Return the BigInt copy count from transition.sector_type.counts.
+"""
+    _sector_copies(transition)::BigInt
+
+Return the total number of tensor copies in the transition's fixed type class.
+"""
 _sector_copies(transition) = sum(transition.sector_type.counts)
 
-# The degree bound for integer stage 1 or 2 of a SectorTransition is a BigInt.
+"""
+    transition_degree(transition::SectorTransition, stage::Integer)::BigInt
+
+Bound the degree of one stage of the balanced degeneration.
+
+For `N` copies and a type class of size `M`, stage 1 has bound `6N`
+and stage 2 has bound `6(M-1)^2`.
+"""
 function transition_degree(transition::SectorTransition, stage::Integer)
     M = transition.sector_type.multiplicity
     stage == 1 && return 6 * _sector_copies(transition)
@@ -43,15 +89,28 @@ function transition_degree(transition::SectorTransition, stage::Integer)
     return throw(ArgumentError("Claim 6.6 has stages 1 and 2"))
 end
 
-# Return a SectorTransition's three polynomial lengths as an NTuple{3,BigInt}.
+"""
+    _sector_input_lengths(transition)::NTuple{3,BigInt}
+
+Return the source polynomial lengths in the original leg order.
+
+The first two lengths describe the inputs to polynomial multiplication.
+The third length describes the output.
+"""
 function _sector_input_lengths(transition)
     a, b = transition.a, transition.b
     _is_midpoint(transition) || (b = 3b + a - 1)
     return (a, b, a + b - 1)
 end
 
-# For local_leg 2 or 3 of a SectorTransition{K}, return the block lengths as
-# an NTuple{K,BigInt} in sector order.
+"""
+    _sector_block_lengths(transition, local_leg)
+
+Return the lengths of the disjoint blocks on local leg 2 or 3 in sector order.
+
+In a tripling, the middle block exchanges the second-input and output
+lengths. The shared first leg has a single set of coordinates.
+"""
 function _sector_block_lengths(transition, local_leg)
     a, b, s = transition.a, transition.b, transition.shift
     if _is_midpoint(transition)
@@ -61,15 +120,27 @@ function _sector_block_lengths(transition, local_leg)
     return local_leg == 2 ? (b, b + a - 1, b) : (b + a - 1, b, b + a - 1)
 end
 
-# For a SectorTransition and integer leg in 1:3, return the NTuple{6,BigInt}
-# of input radices in orientation order.
+"""
+    _sector_input_radices(transition, leg)::NTuple{6,BigInt}
+
+Return the six source seed radices on one balanced leg.
+
+The tuple follows `LEG_PERMUTATIONS`. Its first radix varies fastest
+when packing an individual seed copy.
+"""
 function _sector_input_radices(transition, leg)
     lengths = _sector_input_lengths(transition)
     return ntuple(i -> lengths[LEG_PERMUTATIONS[i][leg]], 6)
 end
 
-# For a SectorTransition and integer leg in 1:3, return the NTuple{6,BigInt}
-# of intermediate radices in orientation order.
+"""
+    _sector_middle_radices(transition, leg)::NTuple{6,BigInt}
+
+Return the six intermediate radices on one balanced leg.
+
+A midpoint doubles the radix of each orientation in which `leg`
+is a nonshared local leg. A tripling partitions its source coordinates.
+"""
 function _sector_middle_radices(transition, leg)
     radices = _sector_input_radices(transition, leg)
     _is_midpoint(transition) || return radices
@@ -79,8 +150,14 @@ function _sector_middle_radices(transition, leg)
     end
 end
 
-# For a SectorTransition, integer leg and one-based integer sector, return
-# an NTuple{6,BigInt} of output radices ordered by orientation.
+"""
+    _sector_output_radices(transition, leg, sector)::NTuple{6,BigInt}
+
+Return the six child seed radices for a one-based sector and a balanced leg.
+
+The radices follow `LEG_PERMUTATIONS` after restoring the middle tripling
+sector to the balanced seed's orientation order.
+"""
 function _sector_output_radices(transition, leg, sector)
     a, b, s = transition.a, transition.b, transition.shift
     if _is_midpoint(transition)
@@ -90,8 +167,14 @@ function _sector_output_radices(transition, leg, sector)
     return ntuple(i -> lengths[LEG_PERMUTATIONS[i][leg]], 6)
 end
 
-# Decode a SectorTransition's one-based integer digit in local_leg 1:3.
-# The coordinate is an integer on leg 1 or an integer pair (sector, index).
+"""
+    _sector_coordinate(transition, local_leg, digit)
+
+Decode a one-based intermediate digit in the original polynomial leg order.
+
+Return the integer digit on the shared first leg or a one-based pair
+`(sector, index)` on legs 2 and 3.
+"""
 function _sector_coordinate(transition, local_leg, digit)
     local_leg == 1 && return digit
     for (sector, length) in enumerate(_sector_block_lengths(transition, local_leg))
@@ -101,8 +184,15 @@ function _sector_coordinate(transition, local_leg, digit)
     return throw(BoundsError())
 end
 
-# leg and orientation are integers in 1:3 and 1:6. Return the shared dot
-# factor axis as Int 1 or 2, or 0 if neither factor shares it.
+"""
+    _sector_dot_axis(leg, orientation)::Int
+
+Find the matrix axis whose digits include the specified orientation's dot factor.
+
+`leg` is in `1:3` and `orientation` is in `1:6`. Return 1 or 2 in the
+order of `_SECTOR_DOT_LEGS`. Return zero when the orientation shares the
+given leg.
+"""
 function _sector_dot_axis(leg, orientation)
     shared = findfirst(==(1), LEG_PERMUTATIONS[orientation])
     first_leg, second_leg = _SECTOR_DOT_LEGS[leg]
@@ -111,13 +201,18 @@ function _sector_dot_axis(leg, orientation)
     return 0
 end
 
-# Use a SectorTransition, integer local leg, dot copy and source index, and
-# a target from _sector_coordinate. For a Rational{BigInt} or PhaseSum
-# monomial t, return a coefficient of either type, or exact zero.
+"""
+    _sector_first_value(transition, local_leg, dot_copy, source, target, t)
+
+Find the coefficient of an intermediate variable in the image of a source variable.
+
+`dot_copy` and `source` are one-based. Use a target coordinate from
+`_sector_coordinate` and a parameter from `evaluation_parameter`. A missing
+target has coefficient zero.
+"""
 function _sector_first_value(transition, local_leg, dot_copy, source, target, t)
     value = Ref{ExactScalar}(zero(t))
-    # Receive an integer or (sector, index) coordinate and a Rational{BigInt}
-    # or PhaseSum coefficient. Record the match and return nothing.
+    # Record the exact coefficient when the emitted coordinate matches target.
     record = function (coordinate, coefficient)
         coordinate == target && (value[] = coefficient)
         return nothing
@@ -131,8 +226,15 @@ function _sector_first_value(transition, local_leg, dot_copy, source, target, t)
     return value[]
 end
 
-# Use a SectorTransition, integer local leg and digit, and a target from
-# _sector_coordinate. Return one or two integer pairs (dot_copy, source_index).
+"""
+    _sector_first_sources(transition, local_leg, target, digit)
+
+List the local source variables contributing to a stage-one target variable.
+
+`digit` is the one-based packed form of `target`. Return one or two
+one-based pairs `(dot_copy, source_index)`. A tripling or a shared local
+leg uses `dot_copy == 1`.
+"""
 function _sector_first_sources(transition, local_leg, target, digit)
     if !_is_midpoint(transition) || local_leg == 1
         return ((1, digit),)
@@ -151,8 +253,15 @@ function _sector_first_sources(transition, local_leg, target, digit)
     return ((1, index), (2, index - s))
 end
 
-# Construct the stage-one LegMap for a SectorTransition and integer leg in 1:3.
-# t is a normalized Rational{BigInt} or PhaseSum monomial.
+"""
+    _sector_first_leg(transition, leg, t)::LegMap
+
+Build the source-to-intermediate substitution for one balanced leg.
+
+Keep the unit digit first. For a midpoint, unpack the source matrix index
+into local dot-copy digits. Combine the local substitutions at the
+normalized Laurent parameter `t`.
+"""
 function _sector_first_leg(transition, leg, t)
     count = _sector_copies(transition)
     units = (2 * transition.sector_type.multiplicity)^6
@@ -162,7 +271,7 @@ function _sector_first_leg(transition, leg, t)
     dot_size = _is_midpoint(transition) ? big(4)^count : big(1)
     source_dim = units * source_q * dot_size^2
     target_dim = units * prod(middle_radices)^count
-    # A BigInt target row and source column select a Rational{BigInt} or PhaseSum.
+    # Read a one-based target row and source column and multiply their local weights.
     coefficient = function (target_row, source_column)
         old, unit = divrem(source_column - 1, units)
         new, new_unit = divrem(target_row - 1, units)
@@ -189,8 +298,7 @@ function _sector_first_leg(transition, leg, t)
         end
         return value
     end
-    # For a BigInt target row, yield (BigInt source column, coefficient) pairs
-    # with Rational{BigInt} or PhaseSum coefficients.
+    # Yield one-based (source column, exact weight) pairs for the target row.
     function entries(target_row)
         new, unit = divrem(target_row - 1, units)
         source_column = unit + 1
@@ -226,7 +334,7 @@ function _sector_first_leg(transition, leg, t)
             end
             source_stride *= source_radices[orientation]
         end
-        # A zero-based BigInt choice mask selects a source column and weight.
+        # Unpack a zero-based mask into one source choice per branching orientation.
         function contribution(bits)
             column, weight = source_column, value
             for options in alternatives
@@ -242,10 +350,20 @@ function _sector_first_leg(transition, leg, t)
     return LegMap(source_dim, target_dim, coefficient, entries)
 end
 
-# The two Matrix{BigInt} coordinate tables index orientations by row and
-# tensor copies by column. Fill the row for the integer orientation using
-# the SectorTransition, integer local leg, Vector{Int} of sector indices
-# and Vector{Int} of cumulative counts starting at zero.
+"""
+    _sector_source_coordinates!(
+        input_coordinates, transition, local_leg, orientation, word,
+        output_coordinates, offsets
+    )::Nothing
+
+Reconstruct one orientation's intermediate coordinates from its child seed coordinates.
+
+Both coordinate tables index orientations by row and tensor copies by
+column. `word` gives the intermediate copy order. `offsets` starts at zero
+and gives the cumulative counts used to index the child copies in sector
+order. The middle tripling sector exchanges its last two legs and reverses
+the indices of its first leg.
+"""
 function _sector_source_coordinates!(
     input_coordinates, transition, local_leg, orientation, word, output_coordinates, offsets
 )
@@ -277,9 +395,16 @@ function _sector_source_coordinates!(
     return nothing
 end
 
-# Construct the stage-two LegMap for a SectorTransition and integer leg in 1:3.
-# t is a normalized Rational{BigInt} or PhaseSum monomial, and L is the BigInt
-# Fourier order chosen by _admissible_separation_order.
+"""
+    _sector_second_leg(transition, leg, t, L)::LegMap
+
+Build the intermediate-to-separated substitution for one balanced leg.
+
+`t` is a normalized Laurent parameter and `L` is the chosen Fourier order.
+Each target row fixes one set of intermediate polynomial coordinates.
+Its source support ranges over the active Fourier digits, packed in radix
+`2M` for type class size `M`.
+"""
 function _sector_second_leg(transition, leg, t, L)
     count = _sector_copies(transition)
     sector_type = transition.sector_type
@@ -298,8 +423,8 @@ function _sector_second_leg(transition, leg, t, L)
                     (radices, n) in zip(output_radices, sector_type.counts))
     source_dim = input_units * prod(middle_radices)^count
     target_dim = output_units * output_q * M^4
-    # A BigInt target row gives a zero-based BigInt packed input index, six
-    # phase multipliers in a Vector{BigInt}, and a BigInt Laurent exponent.
+    # Decode a one-based target row into a zero-based packed polynomial index,
+    # six orientation-specific phase multipliers, and the Laurent exponent.
     function row_parameters(target_row)
         new, word_unit = divrem(target_row - 1, output_units)
         matrix, new = divrem(new, output_q)
@@ -348,13 +473,14 @@ function _sector_second_leg(transition, leg, t, L)
         end
         return (input_q, phases, weight)
     end
-    # Combine NTuple{6,BigInt} digits, Vector{BigInt} multipliers and a
-    # Rational{BigInt} or PhaseSum scale into an exact scalar weight.
+    # Multiply the normalized Laurent scale by the root-of-unity phase
+    # selected by the six zero-based active digits.
     function phase_coefficient(digits, phases, scale)
         phase = sum(digits[i] * phases[i] for i in 1:6)
         return iszero(mod(phase, L)) ? scale : root_of_unity(L, phase) * scale
     end
-    # A BigInt target row and source column select a Rational{BigInt} or PhaseSum.
+    # Read the entry at a one-based target row and source column, masking
+    # inactive digits and polynomial coordinates outside the row's support.
     function coefficient(target_row, source_column)
         old, copy_unit = divrem(source_column - 1, input_units)
         digits = ntuple(i -> div(copy_unit, copy_strides[i]) % physical_order, 6)
@@ -365,8 +491,8 @@ function _sector_second_leg(transition, leg, t, L)
         scale = t^weight / L^2
         return phase_coefficient(digits, phases, scale)
     end
-    # For a BigInt target row, yield (BigInt source column, coefficient) pairs
-    # with Rational{BigInt} or PhaseSum coefficients.
+    # Yield one-based (source column, exact weight) pairs for the active
+    # Fourier copies contributing to the target row.
     function entries(target_row)
         input_q, phases, weight = row_parameters(target_row)
         scale = t^weight / L^2
@@ -380,20 +506,27 @@ function _sector_second_leg(transition, leg, t, L)
 end
 
 """
-    transition_restriction(transition, stage, t; admissible_order=nothing)
+    transition_restriction(
+        transition::SectorTransition, stage::Integer, t; admissible_order=nothing
+    )::TensorRestriction
 
-Return a `TensorRestriction` for integer `stage` 1 or 2 of Claim 6.6.
-`transition` is a `SectorTransition{2}` or `SectorTransition{3}`. `t` is a
-nonzero exact rational or an invertible `PhaseSum` monomial, as accepted by
-`evaluation_parameter`. Input factors are the unit tensor, the balanced seed
-copies, then the matrix tensor if needed. Output factors are the returned
-unit tensor, the child seed copies, then the matrix tensor. The shorter
-child copies come first for midpoint transitions. The intermediate space
-holds the same unit factor and the six oriented sector tensors per copy.
+Build the exact restriction at parameter `t` for one stage of Claim 6.6.
+
+Stage 1 maps source factors ordered as the unit tensor, balanced seed
+copies, and the matrix tensor when needed for a midpoint. Its intermediate
+target contains the unit tensor and six oriented sector tensors per copy.
+Stage 2 maps these intermediate coordinates to the returned unit tensor,
+child seed copies, and matrix tensor. Shorter child copies come first
+for a midpoint. Each leg map has one-based target rows and source
+columns. The first factor varies fastest.
+
+`t` is a nonzero exact rational or an invertible `PhaseSum` monomial, as
+accepted by `evaluation_parameter`.
 For `M = transition.sector_type.multiplicity`, `admissible_order` is `nothing`
-to use `2M` or an integer equal to `2M` or `2M-1`. The second stage keeps
-the physical unit coordinates in radix `2M`. For the smaller order, the
-extra digit is discarded in each orientation as in §7.
+to use `2M` or an integer equal to `2M` or `2M-1`. Choose an order invertible
+in the target field. The second stage keeps the physical unit coordinates in
+radix `2M`. For the smaller order, the extra digit is discarded in each
+orientation as in §7.
 """
 function transition_restriction(
     transition::SectorTransition, stage::Integer, t; admissible_order=nothing

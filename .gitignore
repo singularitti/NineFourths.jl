@@ -1642,3 +1642,7 @@ http-client.private.env.json
 !.zed/settings.json
 !.zed/tasks.json
 !.zed/debug.json
+
+# Keep the Documenter source tree, including the API reference.
+!/docs/
+!/docs/src/lib/

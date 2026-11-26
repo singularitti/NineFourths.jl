@@ -1,9 +1,12 @@
-# `maps` is a triple of callables `f(emit, index)` that each call
-# `emit(coordinate, weight)` for every term in one leg's substitution.
-# `indices` is a triple of source coordinates. A coordinate is an integer
-# for one factor or a tuple of integer indices or `(sector, index)` pairs
-# for several factors. Accumulate `Rational{BigInt}` or `PhaseSum` weights
-# in `coefficients`, a dictionary keyed by triples of emitted coordinates.
+"""
+    sector_test_expand!(coefficients, maps, indices)
+
+Expand one source monomial through the three substitution callbacks.
+
+Each `map(emit, index)` calls `emit(coordinate, weight)` for every term of
+that leg. Accumulate the products of these weights in `coefficients`,
+keyed by triples of emitted coordinates, and return the dictionary.
+"""
 function sector_test_expand!(coefficients, maps, indices)
     maps[1](indices[1]) do x, x_coefficient
         maps[2](indices[2]) do y, y_coefficient
@@ -18,10 +21,14 @@ function sector_test_expand!(coefficients, maps, indices)
     return coefficients
 end
 
-# Add unit-weight terms for integer polynomial lengths `a` and `b` and
-# integer sector label `sector`.
-# `coefficients` is a dictionary with keys `(i, (sector, j), (sector, k))`
-# of integer coordinates and `Rational{BigInt}` weights for the added terms.
+"""
+    sector_test_polynomial!(coefficients, a, b, sector)
+
+Write the unit-weight terms for the polynomial product of lengths `a` and `b`.
+
+Tag the second and third coordinates with `sector` and return the updated
+`coefficients` dictionary.
+"""
 function sector_test_polynomial!(coefficients, a, b, sector)
     for i in 1:a, j in 1:b
         coefficients[(i, (sector, j), (sector, i + j - 1))] = big(1) // 1
@@ -157,8 +164,13 @@ end
     end
 end
 
-# Pack same-length iterables of one-based integer indices and integer radices
-# as a one-based `BigInt` coordinate, with the first axis varying fastest.
+"""
+    sector_test_pack(indices, radices)::BigInt
+
+Pack one-based indices at the corresponding radices with the first axis fastest.
+
+Return a one-based linear coordinate.
+"""
 function sector_test_pack(indices, radices)
     coordinate = big(0)
     stride = big(1)
@@ -307,11 +319,15 @@ end
     end
 end
 
-# For a=1, the two midpoint sectors act by scalar multiplication. The
-# intermediate tensor has coefficient one exactly when the Fourier copies
-# match and each orientation matches its local second and third indices.
-# `columns` is a triple of one-based packed integer source indices. Return
-# the `Int` coefficient `0` or `1`.
+"""
+    scalar_midpoint_source_coefficient(columns)::Int
+
+Compute the intermediate tensor entry for the scalar midpoint fixture.
+
+Decode the three one-based source columns. Return one when the Fourier
+copy coordinates agree and the local second and third indices match in
+both copies of every orientation. Return zero otherwise.
+"""
 function scalar_midpoint_source_coefficient(columns)
     units = 4^6
     digits = map(column -> divrem(column - 1, units), columns)

@@ -51,8 +51,15 @@ end
         NineFourths.root_of_unity(large_length, -1) / large_length
 end
 
-# `a` and `b` are integer polynomial lengths. `coordinates` is a triple of
-# one-based integer leg indices. Return the seed tensor coefficient `0` or `1`.
+"""
+    seed_tensor_entry(a, b, coordinates)::Int
+
+Evaluate a balanced seed entry by checking the six convolution index equations.
+
+Use the polynomial lengths `a` and `b` to unpack the three one-based leg
+indices in `coordinates`. Return one if every orientation contributes,
+or zero otherwise.
+"""
 function seed_tensor_entry(a, b, coordinates)
     dimensions = (a, b, a + b - 1)
     remaining = coordinates .- 1

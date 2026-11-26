@@ -120,13 +120,16 @@ end
               degree in 1:(phase.points - 1))
 end
 
-# In Q(1,2), the two nonscalar legs of each orientation carry the same
-# binary index. Grouping these digits by the scalar leg gives the two
-# matrix indices on each source leg, even across powered copies of Q.
-# `witness` is a `CompiledWitness` over copies of Q(1,2). Integer `leg` and
-# `row` select a restriction row. `embed(weight)` maps each exact coefficient
-# to the field of `zero_weight`. Return a dictionary from zero-based
-# `(BigInt, BigInt)` source matrix indices to weights of that field.
+"""
+    midpoint_test_source_pairs(witness, leg, row; embed=identity, zero_weight=big(0)//1)
+
+Group one restriction row by the matrix index pairs of its source tensor.
+
+In each orientation of `Q(1, 2)`, the two nonscalar legs share one binary
+index. Group these digits by scalar leg across all copies. Return a
+dictionary keyed by zero-based source matrix index pairs and accumulate
+weights converted by `embed` in the field of `zero_weight`.
+"""
 function midpoint_test_source_pairs(
     witness, leg, row; embed=identity, zero_weight=big(0) // 1
 )
@@ -157,9 +160,15 @@ function midpoint_test_source_pairs(
     return weights
 end
 
-# Check a `CompiledWitness` from copies of Q(1,2) to 2×2 matrix multiplication.
-# `embed` maps integer indicators and exact weights (integers, rationals, or
-# `PhaseSum`s in these tests) to the coefficient domain of `zero_weight`.
+"""
+    test_midpoint_tensor_identity(witness; embed=identity, zero_weight=big(0)//1)
+
+Check all 64 entries of a compiled midpoint restriction against the target tensor.
+
+Contract the sparse restriction rows using the source matrix indices of
+the `Q(1, 2)` copies. Use `embed` to convert exact row weights and integer
+target indicators to the domain of `zero_weight`.
+"""
 function test_midpoint_tensor_identity(witness; embed=identity, zero_weight=big(0) // 1)
     Weight = typeof(zero_weight)
     # Three vectors of sparse row dictionaries, four target rows per leg.

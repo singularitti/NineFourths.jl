@@ -1,3 +1,12 @@
+"""
+    NineFourths
+
+Construct, verify, and apply bilinear schemes for matrix multiplication. Use
+[`multiplication_scheme`](@ref) to build Shpilka's finite construction for a
+target exponent above `9//4`, or supply coefficient tables to
+[`BilinearScheme`](@ref). Inspect the scheme with [`verify_scheme`](@ref)
+and apply it to compatible matrices with [`multiply`](@ref).
+"""
 module NineFourths
 
 using Nemo: Nemo

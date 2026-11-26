@@ -1,9 +1,20 @@
-# Default Int budgets for recursive coefficient reads and live dense entries.
+"""
+    DEFAULT_COEFFICIENT_VISITS
+
+Default limit on the total number of coefficient reads across all scheme layers.
+"""
 const DEFAULT_COEFFICIENT_VISITS = 10_000_000
+
+"""
+    DEFAULT_WORKSPACE_ENTRIES
+
+Default limit on the number of live dense matrix entries in a product.
+"""
 const DEFAULT_WORKSPACE_ENTRIES = 10_000_000
 
 """
     ExecutionInfeasible
+    ExecutionInfeasible(reason, input_size, input_shape, block_side, limit)
 
 The requested multiplication could not run a scheme layer. The `reason` symbol
 identifies the failed check. The `input_shape::NTuple{3,Int}` gives `(m, k, n)`
@@ -20,6 +31,11 @@ struct ExecutionInfeasible{S} <: Exception
     limit::Union{BigInt,Nothing}
 end
 
+"""
+    showerror(io::IO, error::ExecutionInfeasible)
+
+Write the product shape and the failed feasibility check to `io`.
+"""
 function Base.showerror(io::IO, error::ExecutionInfeasible)
     m, k, n = error.input_shape
     print(io, "cannot multiply ", m, '×', k, " by ", k, '×', n, " matrices")
@@ -45,8 +61,13 @@ function Base.showerror(io::IO, error::ExecutionInfeasible)
     end
 end
 
-# Explain a scheme's index or visit limit for a numeric or symbolic side.
-# The visits argument is the integer coefficient-visit budget.
+"""
+    _show_dimension_failure(io::IO, side::Integer, visits)
+
+Write the failed side or rank bound for a numerical `side` to `io`.
+
+Use the integer `visits` budget to bound rank when the side fits machine indices.
+"""
 function _show_dimension_failure(io::IO, side::Integer, visits)
     max_side = isqrt(typemax(Int))
     return if side > max_side
@@ -62,6 +83,13 @@ function _show_dimension_failure(io::IO, side::Integer, visits)
     end
 end
 
+"""
+    _show_dimension_failure(io::IO, side::WitnessSide, visits)
+
+Write the failed dimension check for a symbolic Shpilka block side to `io`.
+
+Report a symbolic lower bound when it already exceeds the largest indexable side.
+"""
 function _show_dimension_failure(io::IO, side::WitnessSide, visits)
     scheme = side.scheme
     lower_log = 2 * scheme.program.copies * scheme.derivation.parameters.q
@@ -84,8 +112,14 @@ function _show_dimension_failure(io::IO, side::WitnessSide, visits)
     end
 end
 
-# Package a Symbol reason, an (m, k, n) shape of Int dimensions, a scheme that
-# supplies block_side, and the integer limit or nothing.
+"""
+    _execution_failure(reason, shape, scheme, limit=nothing)::ExecutionInfeasible
+
+Package a feasibility failure with its symbolic `reason` and `(m, k, n)` shape.
+
+Record the scheme's `block_side` for positive shapes, the common dimension for
+square factors of equal size, and the resource `limit` when supplied.
+"""
 function _execution_failure(reason, shape, scheme, limit=nothing)
     m, k, n = shape
     square_side = m == k == n ? m : nothing
@@ -95,37 +129,68 @@ function _execution_failure(reason, shape, scheme, limit=nothing)
     )
 end
 
-# Return BigInt entry counts for the left input, right input, and output matrices.
+"""
+    _matrix_entries((m, k, n)) -> (left, right, output)
+
+Return `BigInt` entry counts for the two factors and result of an `m×k` by `k×n` product.
+"""
 _matrix_entries((m, k, n)) = (big(m) * k, big(k) * n, big(m) * n)
 
-# The entries are a nonempty collection of integer counts, typically BigInt.
+"""
+    _has_addressable_matrices(entries)
+
+Check a nonempty collection of matrix entry counts against the array byte bound.
+
+Use the larger of an `Int` slot and a `Rational{BigInt}` slot for the estimate.
+"""
 function _has_addressable_matrices(entries)
     bytes_per_entry = max(sizeof(Int), Base.elsize(Matrix{Rational{BigInt}}))
     return maximum(entries) <= div(typemax(Int), bytes_per_entry)
 end
 
-# The shape is the integer triple (m, k, n) of one layer and side is the integer
-# number of blocks along each axis. Return the corresponding child dimensions.
+"""
+    _child_shape(shape, side)
+
+Divide each of the three dimensions by `side` and round up to give the child block shape.
+"""
 _child_shape(shape, side) = map(dimension -> cld(dimension, side), shape)
 
-# The shape and child are (m, k, n) triples for this layer and its child.
-# Return the number of nonempty blocks along each dimension.
+"""
+    _active_blocks(shape, child)
+
+Count the blocks containing input or output coordinates along each of three axes.
+
+The `shape` and positive `child` dimensions are `(m, k, n)` triples.
+"""
 _active_blocks(shape, child) = map(cld, shape, child)
 
-# Use another scheme layer when the integer side exceeds one and fits each
-# of the three integer dimensions in child_shape.
+"""
+    _apply_child_layer(side, child_shape)
+
+Test whether another recursive layer fits all child dimensions and can shrink them.
+"""
 _apply_child_layer(side, child_shape) = side > 1 && minimum(child_shape) >= side
 
-# A previously specialized seed can shrink when moved into another field.
-# Use its smallest possible rank before input normalization, then enforce
-# the actual rank after selecting the Fourier orders in the common field.
-# Both limits are integers. Return (side, rank) within the limits or nothing.
+"""
+    _minimum_dimensions(scheme, max_side, max_rank)
+
+Return a `(side, rank)` pair within the limits for preflight, or `nothing`.
+
+Use the scheme's `execution_dimensions` unless field specialization can change its rank.
+"""
 function _minimum_dimensions(scheme, max_side, max_rank)
     return execution_dimensions(scheme, max_side, max_rank)
 end
 
-# For a LoweredScheme, compare the block side and smallest possible rank
-# after field specialization with the integer limits max_side and max_rank.
+"""
+    _minimum_dimensions(scheme::LoweredScheme, max_side, max_rank)
+
+Check the block side and a lower bound on the rank after field specialization.
+
+A previously specialized seed can shrink in another field. Preflight uses
+its minimum possible rank, and planning checks the actual rank after selecting
+the Fourier orders for the input field.
+"""
 function _minimum_dimensions(scheme::LoweredScheme, max_side, max_rank)
     side = block_side(scheme)
     side <= max_side || return nothing
@@ -136,10 +201,16 @@ function _minimum_dimensions(scheme::LoweredScheme, max_side, max_rank)
     return isnothing(rank) ? nothing : (Int(side), Int(rank))
 end
 
-# Plan an (m, k, n) product with positive Int dimensions and nonnegative
-# integer budgets. The dimensions_for(scheme, max_side, max_rank) callback
-# returns positive integer (side, rank) within the bounds or nothing.
-# Return a named tuple (; side, rank) or an ExecutionInfeasible value.
+"""
+    _execution_plan(shape, scheme, max_coefficient_visits, max_workspace_entries;
+                    dimensions_for=execution_dimensions)
+
+Check a positive `(m, k, n)` product and its recursive layers against both budgets.
+
+Call `dimensions_for(scheme, max_side, max_rank)` to obtain positive, bounded
+scheme dimensions or `nothing`. Return a named tuple with `side` and `rank` on
+success or an `ExecutionInfeasible` value describing the failed check.
+"""
 function _execution_plan(
     shape,
     scheme,
@@ -187,8 +258,13 @@ function _execution_plan(
     end
 end
 
-# Enforce the integer entry budget for the two inputs and output of an (m, k, n)
-# product. The scheme supplies block_side for diagnostics.
+"""
+    _check_classical_workspace(shape, scheme, max_workspace_entries)
+
+Check the two factors and result of a conventional `(m, k, n)` product.
+
+Throw `ExecutionInfeasible` on an array bound or workspace budget violation.
+"""
 function _check_classical_workspace(shape, scheme, max_workspace_entries)
     entries = _matrix_entries(shape)
     _has_addressable_matrices(entries) ||
@@ -199,8 +275,13 @@ function _check_classical_workspace(shape, scheme, max_workspace_entries)
     return nothing
 end
 
-# Enforce the integer entry budget for the m×n output when the (m, k, n)
-# shape has a zero dimension. The scheme is passed along for diagnostics.
+"""
+    _check_zero_workspace(shape, scheme, max_workspace_entries)
+
+Check the `m×n` output bounds for a product with a zero dimension in `shape`.
+
+Throw `ExecutionInfeasible` when the output is unaddressable or exceeds the entry budget.
+"""
 function _check_zero_workspace(shape, scheme, max_workspace_entries)
     m, _, n = shape
     output_entries = big(m) * n

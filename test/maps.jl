@@ -1,12 +1,21 @@
-# A callable fixture backed by a table `values::T`. The tests use a coefficient
-# matrix, a tuple of row supports, and a tuple of selected source columns.
+"""
+    TestMapLookup(values)
+
+Wrap a coefficient table, row-support table, or selection table as a callable.
+"""
 struct TestMapLookup{T}
     values::T
 end
 
-# Accept one-based `BigInt` indices. Two indices return a coefficient. One
-# index returns an iterable of `(column, coefficient)` pairs or an integer
-# source column, with zero marking an empty selection.
+"""
+    (lookup::TestMapLookup)(indices::BigInt...)
+
+Look up an entry at the given one-based indices.
+
+Two indices return a coefficient. With a single row index, return its
+`(column, coefficient)` pairs or its selected column, depending on the
+table. A selected column of zero marks an empty selection.
+"""
 (lookup::TestMapLookup)(indices::BigInt...) = lookup.values[indices...]
 
 @testset "Callable leg map callbacks" begin

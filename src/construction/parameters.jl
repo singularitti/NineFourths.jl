@@ -1,18 +1,41 @@
-# The reference exponent stored exactly as a Rational{BigInt}.
+"""
+    _OPENAI_EXPONENT_BOUND::Rational{BigInt}
+
+The exact reference exponent `9//4` that the construction approaches.
+"""
 const _OPENAI_EXPONENT_BOUND = big(9) // 4
 
-# Keep powers that would make a symbolic rule itself expensive in factored form.
+"""
+    ScaledPowerOfTwo(coefficient, exponent)
+
+Represent the exact product `coefficient * 2^exponent` in factored form.
+
+Both fields are stored as `BigInt`. This representation keeps large powers
+from having to be expanded when only the construction parameters are needed.
+"""
 struct ScaledPowerOfTwo
     coefficient::BigInt
     exponent::BigInt
 end
 
+"""
+    show(io::IO, value::ScaledPowerOfTwo)
+
+Write `value` as a coefficient times a power of two without expanding it.
+"""
 function Base.show(io::IO, value::ScaledPowerOfTwo)
     return print(io, value.coefficient, " * 2^", value.exponent)
 end
 
-# Shift an integer coefficient by an integer exponent. The result is a BigInt
-# for ordinary shifts or a ScaledPowerOfTwo with two BigInt fields for large powers.
+"""
+    _scaled_power_of_two(coefficient::Integer, exponent::Integer)
+
+Scale an integer coefficient by a power of two.
+
+Return a shifted `BigInt` for ordinary shifts or a `ScaledPowerOfTwo` for
+large exponents. Construction parameters use nonnegative exponents, for which
+both representations give the exact product.
+"""
 function _scaled_power_of_two(coefficient::Integer, exponent::Integer)
     coefficient = BigInt(coefficient)
     # The cutoff controls storage only. The factored value is also exact.
@@ -26,17 +49,19 @@ end
 """
     ShpilkaParameters(target)
 
-Exact parameters in Shpilka's proof of Theorem 1.2. `target` must have a
-finite exact rational value above OpenAI's `9//4` bound. Julia integers and
-rationals and Nemo values supported by `rational_result`, such as
-`Nemo.QQFieldElem`, are accepted. `target` and `epsilon` are stored as
-`Rational{BigInt}`. `epsilon` is the gap between the target and `9//4`,
-capped at one.
+Choose the exact parameters in Shpilka's proof of Theorem 1.2.
 
-`q` is `ceil(16 / epsilon^2)`, and `step_bound` bounds the non-baseline
-derivation entries. Both are `BigInt`. `a` is `q * 2^q`, and `length_bound`
-bounds the coordinates. Both are `BigInt` or `ScaledPowerOfTwo` for large
-powers stored in factored form.
+`target` must have a finite exact rational value above OpenAI's `9//4` bound.
+The constructor accepts Julia integers and rationals and Nemo values supported
+by `rational_result`, such as `Nemo.QQFieldElem`. A nonfinite rational target or
+one at or below `9//4` raises `DomainError`.
+
+`target` and `epsilon` are stored as `Rational{BigInt}`. `epsilon` is the gap
+between the target and `9//4`, capped at one. `q = ceil(16 / epsilon^2)` and
+`step_bound = q * (2q^2 + 7q)` are stored as `BigInt`. The latter bounds the
+number of non-baseline derivation entries. `a = q * 2^q` is the final diagonal
+coordinate and `length_bound = 4a` bounds all lengths in the derivation.
+These two values are `BigInt` or, for large powers, `ScaledPowerOfTwo`.
 """
 struct ShpilkaParameters
     target::Rational{BigInt}
