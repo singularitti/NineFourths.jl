@@ -1,3 +1,38 @@
+struct TestMapLookup{T}
+    values::T
+end
+
+# This callback detects paths that fail to pass the documented index type.
+(lookup::TestMapLookup)(indices::BigInt...) = lookup.values[indices...]
+
+@testset "Callable leg map callbacks" begin
+    NF = NineFourths
+    entry = TestMapLookup([0 -3; 4 0])
+    support = TestMapLookup((((2, -3),), ((1, 4),)))
+    dense = NF.LegMap(2, 2, entry)
+    sparse = NF.LegMap(2, 2, entry, support)
+    @test dense[1, 2] == -3
+    @test only(NF.row_entries(dense, 1)) == (2, -3)
+    @test only(NF.row_entries(sparse, 2)) == (1, 4)
+
+    selected = NF.selection_map(3, 2, TestMapLookup((3, 0)))
+    selected_restriction = NF.TensorRestriction(selected, selected, selected)
+    reindex = NF.selection_map(2, 2, Int)
+    selection_composite = NF.compose_restrictions(
+        selected_restriction, NF.TensorRestriction(reindex, reindex, reindex)
+    ).legs[1]
+    @test selection_composite[1, 3] == 1
+    @test only(NF.row_entries(selection_composite, 1)) == (3, 1)
+    @test selection_composite[2, 3] == 0
+    @test isempty(NF.row_entries(selection_composite, 2))
+
+    weighted_composite = NF.compose_restrictions(
+        selected_restriction, NF.TensorRestriction(sparse, sparse, sparse)
+    ).legs[1]
+    @test weighted_composite[2, 3] == 4
+    @test only(NF.row_entries(weighted_composite, 2)) == (3, 4)
+end
+
 @testset "Directed linear maps and matrix tensor coordinates" begin
     NF = NineFourths
     a = NF.selection_map(7, 3, row -> (7, 2, 5)[row])
@@ -29,6 +64,12 @@
         (term, 1) in NF.row_entries(classical.legs[leg], row) for
         (leg, row) in enumerate((8, 3, 2))
     )
-    reordered = NF.permute_factors([(2, 3, 4), (3, 4, 2), (4, 2, 3)], [3, 1, 2])
+    dimensions = ((2, 3, 4), (3, 4, 2), (4, 2, 3))
+    reordered = NF.permute_factors(
+        Iterators.Stateful(dimensions), Iterators.Stateful((3, 1, 2))
+    )
+    @test NF.target_dims(reordered) == (24, 24, 24)
     @test reordered.legs[1][3 + 4 * (1 + 2 * 2), 2 + 2 * (2 + 3 * 2)] == 1
+    @test only(NF.row_entries(reordered.legs[1], 1)) == (1, 1)
+    @test_throws ArgumentError NF.permute_factors(dimensions, (1, 1, 3))
 end

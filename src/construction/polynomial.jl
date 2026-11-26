@@ -22,11 +22,12 @@ function _sample_order(admissible_order, preferred, alternate)
 end
 
 """
-Theorem 3.1 using roots of unity for evaluation and interpolation. The
-optional `admissible_order` predicate chooses an invertible order from
-`a+b-1` and `a+b`. Both orders exceed the degree of the product.
+Theorem 3.1 using roots of unity for evaluation and interpolation with
+positive integer input lengths `a` and `b`. The optional `admissible_order`
+predicate chooses an invertible order from `a+b-1` and `a+b`. Both orders
+exceed the degree of the product.
 """
-function polynomial_decomposition(a::Integer, b::Integer; admissible_order=nothing)
+function polynomial_decomposition(a, b; admissible_order=nothing)
     dimensions = polynomial_dims(a, b)
     minimum_order = dimensions[3]
     order = _sample_order(admissible_order, minimum_order, minimum_order + 1)
@@ -57,13 +58,17 @@ struct SeedDecomposition
     terms::BigInt
 end
 
-function seed_dims(a::Integer, b::Integer)
+function seed_dims(a, b)
     dimension = prod(polynomial_dims(a, b))^2
     return (dimension, dimension, dimension)
 end
 
-"""Rank decomposition of `Q(a,b)⊗m` with the first tensor factor varying fastest."""
-function seed_decomposition(a::Integer, b::Integer, m::Integer=1; admissible_order=nothing)
+"""
+Rank decomposition of `Q(a,b)⊗m` for positive integer lengths `a` and `b`
+and a nonnegative integer number of copies `m`. The first tensor factor
+varies fastest.
+"""
+function seed_decomposition(a, b, m::Integer=1; admissible_order=nothing)
     m >= 0 || throw(ArgumentError("the number of seed copies must be nonnegative"))
     polynomial = polynomial_decomposition(a, b; admissible_order)
     copies = BigInt(m)
@@ -132,7 +137,7 @@ function baseline_source_coordinate(
     for permutation in LEG_PERMUTATIONS
         original_leg = permutation[leg]
         if original_leg != scalar_leg
-            missing_leg = findfirst(==(scalar_leg), permutation)::Int
+            missing_leg = findfirst(==(scalar_leg), permutation)
             remaining, digit = divrem(axis_digits[missing_leg], digit_base)
             axis_digits = Base.setindex(axis_digits, remaining, missing_leg)
             source += stride * digit

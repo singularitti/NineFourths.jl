@@ -71,7 +71,15 @@ end
 end
 
 @testset "Fixed types and exact Fourier separation" begin
-    sector_type = NineFourths.SectorType((2, 1, 1))
+    counts = Any[Int16(2), UInt8(1), big(1)]
+    sector_type = NineFourths.SectorType(Iterators.Stateful(counts))
+    @test sector_type.counts isa NTuple{3,BigInt}
+    @test sector_type.counts == (2, 1, 1)
+    @test_throws MethodError NineFourths.SectorType([2.0, 1.0])
+    @test_throws DomainError NineFourths.SectorType((1, -1, 1))
+    empty_type = NineFourths.SectorType(())
+    @test NineFourths.type_rank(empty_type, ()) == 1
+    @test isempty(NineFourths.type_word(empty_type, 1))
     words = [
         (1, 1, 2, 3),
         (1, 1, 3, 2),
@@ -91,15 +99,24 @@ end
         NineFourths.type_rank(sector_type, word) == rank for
         (rank, word) in enumerate(words)
     )
+    @test NineFourths.type_rank(sector_type, Iterators.filter(>(0), (1, 0, 2, 1, 3))) == 3
     @test all(
         Tuple(NineFourths.type_word(sector_type, rank)) == word for
         (rank, word) in enumerate(words)
     )
     @test isnothing(NineFourths.type_rank(sector_type, (1, 1, 1, 2)))
+    @test isnothing(NineFourths.type_rank(sector_type, (1, 1, 2)))
+    @test isnothing(NineFourths.type_rank(sector_type, (1, 1, 2, 3, 1)))
 
     sector_type = NineFourths.SectorType((1, 1))
     t = -3 // 2
     rootpower = exponent -> NineFourths.root_of_unity(4, exponent)
+    @test NineFourths.evaluation_parameter(Nemo.QQ(t)) == t
+    for coordinates in ((101,), (101, 202, 303))
+        @test_throws DimensionMismatch NineFourths.separation_column(
+            tuple, sector_type, 1, 0, coordinates, t
+        )
+    end
     for (i, word) in enumerate(((1, 2), (2, 1), (2, 2)))
         x_indices = (101, 202)
         y_indices = ((word[1], 11), (word[2], 22))
@@ -108,7 +125,7 @@ end
         for ρ in 0:3
             maps = ntuple(3) do leg
                 (emit, index) -> NineFourths.separation_column(
-                    emit, sector_type, leg, ρ, index, t, rootpower
+                    emit, sector_type, leg, ρ, Iterators.Stateful(index), t, rootpower
                 )
             end
             sector_test_expand!(observed, maps, (x_indices, y_indices, z_indices))

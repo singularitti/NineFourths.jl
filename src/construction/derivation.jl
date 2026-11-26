@@ -68,7 +68,7 @@ Generate the proof entries in dependency order with exact dyadic values. This
 enumerates the full derivation, including intermediate entries of the row
 extensions. For targets close to `9//4` it can require substantial resources.
 """
-function materialize_derivation(derivation::ShpilkaDerivation)
+function materialize_derivation(derivation)
     q = derivation.parameters.q
     nodes = [DerivationNode(q, q, q // 1, :baseline, ())]
     index = 1

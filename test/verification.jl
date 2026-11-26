@@ -16,6 +16,17 @@
     @test isnothing(report.target)
     @test isempty(report.diagnostics)
 
+    table = TestMatrixLike(U, 1)
+    indexed = BilinearScheme(table, Nemo.matrix(Nemo.ZZ, V), W)
+    @test indexed.U === table
+    @test indexed[1, 1, 1] == U[1, 1]
+    @test verify_scheme(indexed).valid
+    A = [1 2; 3 4]
+    @test multiply(A, A, indexed) == A * A
+    @test_throws ArgumentError BilinearScheme(TestMatrixLike(U), V, W)
+    @test_throws DimensionMismatch BilinearScheme(vec(U), vec(V), vec(W))
+    @test_throws DimensionMismatch BilinearScheme(U, reshape(V, 4, 8, 1), W)
+
     W[2, 1] = 1
     report = NineFourths.verify_scheme(NineFourths.explicit_scheme(U, V, W))
     @test !report.valid

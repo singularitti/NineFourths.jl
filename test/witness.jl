@@ -9,6 +9,8 @@
     @test witness.copies == 1
     @test NineFourths.source_dims(witness.restriction) == NineFourths.seed_dims(1, 2)
     @test NineFourths.target_dims(witness.restriction) == NineFourths.mm_dims(4)
+    @test witness.recipe.nodes == baseline
+    @test witness.recipe.nodes !== baseline
 
     midpoint = [
         node(1, 1, 1, :baseline), node(1, 3, 3, :baseline), node(1, 2, 2, :midpoint, (1, 2))

@@ -61,9 +61,6 @@ function _unsupported_verification_scalar(value)
     return value isa Nemo.RingElem && !Nemo.is_exact_type(typeof(value))
 end
 
-_widen_verification_scalar(value) = to_exact(value)
-_widen_verification_scalar(value::Nemo.ZZRingElem) = to_exact(BigInt(value))
-
 function _native_verification_scalar(options, value)
     if value isa Union{PhaseSum,Nemo.QQBarFieldElem}
         if options.one isa Nemo.QQBarFieldElem
@@ -82,9 +79,7 @@ end
 function _verification_coefficients(tables, field)
     if isnothing(field) && all(T -> all(_verification_rational_or_algebraic, T), tables)
         zero_value = zero(Rational{BigInt})
-        return map(T -> map(_widen_verification_scalar, T), tables),
-        zero_value,
-        one(zero_value)
+        return map(T -> map(to_exact, T), tables), zero_value, one(zero_value)
     end
     # Rational coefficients can embed in the field of the native entries.
     # Inspect each table before converting so a mixed parent is identified.
@@ -128,12 +123,20 @@ function _verification_coefficients(tables, field)
     return converted, zero_value, one_value
 end
 
+# Julia arrays can preserve their storage when mapped to exact scalars.
+_verification_entries(table::AbstractMatrix) = table
+
+function _verification_entries(table)
+    rows, terms = size(table)
+    return (table[row, term] for row in 1:rows, term in 1:terms)
+end
+
 function _verify_coefficient_tables(u, U, V, W; field=nothing)
     dimensions = size(U)
-    entries, rank = dimensions
     if u < 1 ||
-        big(u)^2 != entries ||
-        rank < 1 ||
+        length(dimensions) != 2 ||
+        big(u)^2 != dimensions[1] ||
+        dimensions[2] < 1 ||
         size(V) != dimensions ||
         size(W) != dimensions
         return _verification_failure(
@@ -141,7 +144,7 @@ function _verify_coefficient_tables(u, U, V, W; field=nothing)
             "and one column per rank term.",
         )
     end
-    tables = (U, V, W)
+    tables = map(_verification_entries, (U, V, W))
     if any(T -> any(value -> value isa _BuiltinRational && !isfinite(value), T), tables)
         return _verification_failure("The explicit maps must have finite coefficients.")
     end
@@ -247,7 +250,7 @@ function _is_scaled_power(value::ScaledPowerOfTwo, coefficient, exponent)
     return value.coefficient == coefficient && value.exponent == exponent
 end
 
-function _is_scaled_power(value::BigInt, coefficient, exponent)
+function _is_scaled_power(value::Integer, coefficient, exponent)
     value > 0 || return false
     ndigits(value; base=2) == exponent + ndigits(coefficient; base=2) || return false
     shift = Int(exponent)

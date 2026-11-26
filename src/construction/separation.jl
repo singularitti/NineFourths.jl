@@ -1,10 +1,11 @@
 # A column callback expands the image of one source variable under substitution.
 # Polynomial and sector indices are one-based. Fourier exponents are zero-based.
 
-function evaluation_parameter(t::Union{Integer,Rational})
-    isfinite(t) && !iszero(t) ||
+function evaluation_parameter(t)
+    parameter = rational_result(t)
+    isfinite(parameter) && !iszero(parameter) ||
         throw(DomainError(t, "Laurent substitutions require a finite nonzero parameter"))
-    return Rational{BigInt}(t)
+    return parameter
 end
 
 function evaluation_parameter(t::PhaseSum)
@@ -17,7 +18,8 @@ end
 """
     midpoint_column(emit, a, b, s, leg, copy, index, t)
 
-Substitute a variable of `C(a,b) ⊗ B_X(2)` as in Lemma 5.6. The first leg
+Substitute a variable of `C(a,b) ⊗ B_X(2)` as in Lemma 5.6, calling
+`emit(coordinate, coefficient)` for each term in its image. The first leg
 uses a scalar index. On each other leg the output is `(sector, index)`,
 with sector 1 the `b-s` kernel and sector 2 the `b+s` complement.
 """
@@ -48,7 +50,8 @@ end
 """
     tripling_column(emit, a, b, leg, index, t)
 
-Substitute a variable of `C(a,3b+a-1)` as in Lemma 5.2. On the second and
+Substitute a variable of `C(a,3b+a-1)` as in Lemma 5.2, calling
+`emit(coordinate, coefficient)` for each term in its image. On the second and
 third legs the image is indexed by `(sector, index)` in the three
 consecutive intervals. The middle sector still has its first-input
 indices reversed and its second and third legs exchanged.
@@ -71,6 +74,7 @@ function tripling_column(emit, a, b, leg, index, t)
     return nothing
 end
 
+"""Compute the exact multinomial coefficient of an iterable of nonnegative counts."""
 function type_multiplicity(counts)
     total = big(0)
     multiplicity = big(1)
@@ -82,22 +86,35 @@ function type_multiplicity(counts)
     return multiplicity
 end
 
+"""
+    SectorType(counts)
+
+Store a finite iterable of nonnegative integer sector counts in iteration
+order, together with its exact multinomial coefficient.
+"""
 struct SectorType{K}
     counts::NTuple{K,BigInt}
     multiplicity::BigInt
 end
 
-function SectorType(counts::NTuple{K,Integer}) where {K}
-    return SectorType{K}(map(big, counts), type_multiplicity(counts))
+_exact_sector_count(count::Integer) = BigInt(count)
+
+function SectorType(counts)
+    exact_counts = Tuple(_exact_sector_count(count) for count in counts)
+    return SectorType(exact_counts, type_multiplicity(exact_counts))
 end
 
-function type_rank(sector_type::SectorType, word)
+"""
+Return the one-based lexicographic rank of an iterable of sector indices,
+or `nothing` for a word outside the fixed type.
+"""
+function type_rank(sector_type, word)
     remaining = collect(sector_type.counts)
-    slots = sum(remaining)
-    BigInt(length(word)) == slots || return nothing
+    slots = sum(remaining; init=big(0))
     completions = sector_type.multiplicity
     rank = big(1)
     for sector in word
+        iszero(slots) && return nothing
         1 <= sector <= length(remaining) || return nothing
         iszero(remaining[sector]) && return nothing
         for previous in 1:(sector - 1)
@@ -107,14 +124,14 @@ function type_rank(sector_type::SectorType, word)
         remaining[sector] -= 1
         slots -= 1
     end
-    return rank
+    return iszero(slots) ? rank : nothing
 end
 
-function type_word(sector_type::SectorType, rank::Integer)
+function type_word(sector_type, rank::Integer)
     1 <= rank <= sector_type.multiplicity ||
         throw(BoundsError(1:sector_type.multiplicity, rank))
     remaining = collect(sector_type.counts)
-    slots = sum(remaining)
+    slots = sum(remaining; init=big(0))
     completions = sector_type.multiplicity
     word = Vector{Int}(undef, Int(slots))
     for position in eachindex(word)
@@ -133,8 +150,10 @@ function type_word(sector_type::SectorType, rank::Integer)
     return word
 end
 
-function ordered_sector_indices(sector_type::SectorType, word, coordinates)
+function ordered_sector_indices(sector_type, word, coordinates)
     positions = cumsum([0; Int.(collect(sector_type.counts))])
+    length(coordinates) == last(positions) ||
+        throw(DimensionMismatch("expected one source coordinate per tensor factor"))
     ordered = Vector{eltype(coordinates)}(undef, length(coordinates))
     for (sector, index) in zip(word, coordinates)
         positions[sector] += 1
@@ -163,7 +182,9 @@ end
 Substitute one variable of `I_(2M) ⊗ (∑ᵢ Tᵢ)^⊗N` using Lemmas 5.1 and 5.5,
 where `M = sector_type.multiplicity`. Use Fourier order `L = 2M` by default
 or choose `L = 2M-1` as in §7. Copies are numbered from zero through `2M-1`.
-The first `L` copies are active.
+The first `L` copies are active. The finite iterable `coordinates` supplies
+one source index per tensor factor, in factor order. The substitution calls
+`emit(coordinate, coefficient)` for each term in the image.
 If supplied, `rootpower(e)` returns the `e`th power of a primitive
 `L`th root of unity. Each image coordinate is
 `(type_rank, dot_index, canonical_indices)`. The shared first leg uses
@@ -172,7 +193,7 @@ If supplied, `rootpower(e)` returns the `e`th power of a primitive
 """
 function separation_column(
     emit,
-    sector_type::SectorType,
+    sector_type,
     leg,
     ρ,
     coordinates,
@@ -185,6 +206,7 @@ function separation_column(
     L = _admissible_separation_order(M, admissible_order)
     ρ >= L && return nothing
     rootpower = isnothing(rootpower) ? exponent -> root_of_unity(L, exponent) : rootpower
+    coordinates = collect(coordinates)
     if leg == 1
         for j in 0:(M - 1)
             word = type_word(sector_type, j + 1)

@@ -34,9 +34,7 @@ function _finish_field_phases(terms, zero_value)
     return FieldPhaseSum(terms, zero_value)
 end
 
-function _field_phase_coefficient(
-    embed, coefficient::PhaseSum, zero_value=embed(big(0) // 1)
-)
+function _field_phase_coefficient(embed, coefficient, zero_value=embed(big(0) // 1))
     terms = _FieldPhaseTerms()
     for (phase, weight) in coefficient.terms
         _add_field_phase!(terms, phase, embed(weight), zero_value)
@@ -128,7 +126,7 @@ end
 # On a Julia complex field the formal fourth root acts as the native i.
 # If f is the integer-linear projection above, f(z) + i*f(-i*z) commutes
 # with multiplication by i and fixes the Gaussian scalars.
-function _project_complex_value(value::FieldPhaseSum)
+function _project_complex_value(value)
     factors = Dict{BigInt,Union{Nothing,Vector{BigInt}}}()
     result = value.zero_value
     for (phase, weight) in value.terms

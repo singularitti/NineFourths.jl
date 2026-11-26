@@ -5,7 +5,6 @@ end
 
 Base.showerror(io::IO, error::CoefficientIncompatible) = print(io, error.message)
 
-const FieldMatrix = Union{AbstractMatrix,Nemo.MatElem,Nemo.MatRingElem}
 const _BuiltinInteger = Union{
     Bool,Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,BigInt
 }
@@ -79,7 +78,7 @@ function _field_unit_integer(one_value, n::Integer)
     return _field_integer(one_value, n) != one_value - one_value
 end
 
-_matrix_field(::AbstractMatrix) = nothing
+_matrix_field(matrix) = nothing
 
 function _matrix_field(matrix::Union{Nemo.MatElem,Nemo.MatRingElem})
     domain = Nemo.base_ring(matrix)
@@ -131,7 +130,7 @@ function _field_metadata(A, B)
         declared = eltype(matrix)
         rational_entries |= declared <: _BuiltinRational && declared !== Union{}
         exact_entries |= declared <: _BuiltinExact && declared !== Union{}
-        if isempty(matrix)
+        if any(iszero, size(matrix))
             if declared === Nemo.ZZRingElem
                 domain = _common_field(domain, Nemo.ZZ)
             elseif declared === Nemo.QQFieldElem
@@ -141,7 +140,8 @@ function _field_metadata(A, B)
             end
             continue
         end
-        for j in axes(matrix, 2), i in axes(matrix, 1)
+        rows, columns = axes(matrix)
+        for j in columns, i in rows
             value = matrix[i, j]
             if value isa _BuiltinExact
                 exact_entries = true
@@ -300,7 +300,8 @@ end
 
 function _copy_field_matrix(convert_entry, matrix, ::Type{T}) where {T}
     result = Matrix{T}(undef, size(matrix)...)
-    for (j, column) in enumerate(axes(matrix, 2)), (i, row) in enumerate(axes(matrix, 1))
+    rows, columns = axes(matrix)
+    for (j, column) in enumerate(columns), (i, row) in enumerate(rows)
         try
             result[i, j] = convert_entry(matrix[row, column])
         catch error
@@ -318,12 +319,15 @@ function _legacy_matrix(matrix)
     return _copy_field_matrix(identity, matrix, eltype(matrix))
 end
 
-# `field` may be an element prototype, a concrete scalar type with identities,
-# or a parent callable as `field(0)` and `field(1)`.
-function _field_inputs(A::FieldMatrix, B::FieldMatrix; field=nothing)
-    m, k = size(A)
-    inner, n = size(B)
-    k == inner || throw(DimensionMismatch("matrix inner dimensions must agree"))
+function _multiplication_shape(A, B)
+    m, k = _matrix_size(A)
+    right_rows, n = _matrix_size(B)
+    k == right_rows || throw(DimensionMismatch("input inner dimensions must match"))
+    return (m, k, n)
+end
+
+function _field_inputs(A, B, shape=_multiplication_shape(A, B); field=nothing)
+    m, k, n = shape
     options = _field_configuration(_field_metadata(A, B), field)
     if (m > 0 && n > 0) && isnothing(options.zero)
         throw(

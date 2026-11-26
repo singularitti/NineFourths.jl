@@ -20,6 +20,13 @@
     @test large.a.exponent == large.q
     @test large.length_bound.coefficient == 4 * large.q
     @test large.length_bound.exponent == large.q
+
+    expanded = NineFourths._scaled_power_of_two(Int8(3), UInt16(200))
+    @test expanded isa BigInt
+    @test expanded == big(3) << 200
+    factored = NineFourths._scaled_power_of_two(UInt8(3), Int16(4097))
+    @test factored.coefficient == 3
+    @test factored.exponent == 4097
 end
 
 @testset "Shpilka derivation" begin

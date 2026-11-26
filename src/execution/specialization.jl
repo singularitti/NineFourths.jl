@@ -1,6 +1,6 @@
 # The symbolic target is field-independent. At execution time every Fourier
 # order and interpolation denominator must be invertible in the input field.
-_specialize_scheme(s::BilinearScheme, admissible) = s
+_specialize_scheme(scheme, admissible) = scheme
 
 function _specialize_scheme(s::ShpilkaScheme, admissible)
     return lower_scheme(s; admissible_order=admissible)
@@ -56,13 +56,13 @@ end
 
 _scheme_weight(field, value) = _field_embed_native(field, value)
 
-function _field_coefficient(field, scheme::BilinearScheme, term, leg, coordinate)
+function _field_coefficient(field, scheme, term, leg, coordinate)
     return _scheme_weight(field, scheme_coefficient(scheme, term, leg, coordinate))
 end
 
 # A supplied algebraic-number coefficient can belong to the same concrete
 # number field as a symbolic root. Evaluate them with a consistent embedding.
-function _concrete_algebraic_value(value::FieldPhaseSum)
+function _concrete_algebraic_value(value)
     result = ALGEBRAIC_NUMBERS(0)
     for (phase, weight) in value.terms
         root = root_of_unity(denominator(phase), numerator(phase))

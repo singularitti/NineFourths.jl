@@ -8,12 +8,20 @@ struct ExplicitScheme{A,B,C} <: BilinearScheme
     W::C
 end
 
+function _matrix_size(matrix)
+    dimensions = size(matrix)
+    length(dimensions) == 2 ||
+        throw(DimensionMismatch("expected a matrix, got size $dimensions"))
+    return dimensions
+end
+
 """Construct a scheme from three column-major tables (block coordinates × terms)."""
-function explicit_scheme(U::AbstractMatrix, V::AbstractMatrix, W::AbstractMatrix)
-    Base.require_one_based_indexing(U, V, W)
-    size(U) == size(V) == size(W) ||
+function explicit_scheme(U, V, W)
+    dimensions = _matrix_size(U)
+    dimensions == size(V) == size(W) ||
         throw(DimensionMismatch("the three coefficient tables must have the same size"))
-    rows, rank = size(U)
+    Base.require_one_based_indexing(U, V, W)
+    rows, rank = dimensions
     u = isqrt(rows)
     u > 0 && u^2 == rows && rank > 0 ||
         throw(DimensionMismatch("expected u² rows and at least one column"))
@@ -23,14 +31,14 @@ end
 """
     BilinearScheme(U, V, W)
 
-Create a scheme from three coefficient tables with `u²` rows and one column
-per product. Each column describes a left linear form, a right linear form
-and the weights of the product in the output. Coefficients may be elements
-of the same field as the input matrices.
+Create a scheme from three one-based coefficient tables with `u²` rows and
+one column per product. Each table supplies its two dimensions through
+`size(table)` and its coefficients through `table[row, term]`. The scheme
+retains the supplied tables. Each column describes a left linear form, a
+right linear form and the weights of the product in the output. Coefficients
+may be elements of the same field as the input matrices.
 """
-function BilinearScheme(U::AbstractMatrix, V::AbstractMatrix, W::AbstractMatrix)
-    return explicit_scheme(U, V, W)
-end
+BilinearScheme(U, V, W) = explicit_scheme(U, V, W)
 
 """Operations and size bounds for Shpilka's finite construction (§6)."""
 struct ShpilkaProgram{Ops<:Tuple}
@@ -51,9 +59,9 @@ end
 """
     multiplication_scheme(target_exponent=5//2) -> BilinearScheme
 
-Construct Shpilka's exact bilinear algorithm for the given rational upper bound
-on the matrix multiplication exponent. The target must exceed OpenAI's bound
-of `9//4`.
+Construct Shpilka's exact bilinear algorithm for an integer or exact rational
+upper bound on the matrix multiplication exponent. The target must exceed
+OpenAI's bound of `9//4`.
 The finite substitution program retains tensor powers and derivation loops
 without expanding their coefficient tables. It can be reused for many inputs.
 
@@ -63,7 +71,7 @@ indexes a coefficient (legs 1 and 2 are the left and right input forms, leg 3
 is the output weight). Coefficients of a Shpilka scheme print as unevaluated
 contractions.
 """
-function multiplication_scheme(target_exponent::Union{Integer,Rational}=5//2)
+function multiplication_scheme(target_exponent=5//2)
     parameters = ShpilkaParameters(target_exponent)
     derivation = ShpilkaDerivation(parameters)
     S = parameters.step_bound
@@ -111,7 +119,7 @@ function Base.show(io::IO, ::MIME"text/plain", s::ShpilkaScheme)
 end
 
 function execution_dimensions(s::ExplicitScheme, maxside, maxrank)
-    rank = size(s.U, 2)
+    _, rank = size(s.U)
     return s.u <= maxside && rank <= maxrank ? (s.u, rank) : nothing
 end
 
@@ -149,12 +157,10 @@ function execution_dimensions(s::ShpilkaScheme, maxside, maxrank)
     return u <= maxside ? (Int(u), Int(rank)) : nothing
 end
 
-_materialize_length(x::BigInt) = x
+_materialize_length(x::Integer) = big(x)
 _materialize_length(x::ScaledPowerOfTwo) = x.coefficient * big(2)^x.exponent
 
-function scheme_coefficient(
-    s::ExplicitScheme, term::Integer, leg::Integer, coordinate::Integer
-)
+function scheme_coefficient(s::ExplicitScheme, term, leg, coordinate)
     table = (s.U, s.V, s.W)[leg]
     return table[coordinate, term]
 end
@@ -179,9 +185,7 @@ function execution_dimensions(s::LoweredScheme, maxside, maxrank)
 end
 
 """Contract one target row of an exact restriction with one rank-one seed term."""
-function scheme_coefficient(
-    s::LoweredScheme, term::Integer, leg::Integer, coordinate::Integer
-)
+function scheme_coefficient(s::LoweredScheme, term, leg, coordinate)
     1 <= term <= rank_count(s.seed) || throw(BoundsError(s, term))
     row = s.witness.restriction.legs[leg]
     total = big(0)//1
@@ -191,7 +195,7 @@ function scheme_coefficient(
     return total
 end
 
-function lower_scheme(s::ShpilkaScheme; admissible_order=nothing)
+function lower_scheme(s; admissible_order=nothing)
     build, compile, decompose = s.program.operations
     witness = compile(
         build(s.derivation), s.program.power; step_bound=s.program.steps, admissible_order
@@ -223,7 +227,7 @@ end
 # For ordinary index queries the proven lower bounds settle membership
 # immediately. Only an index with an exceptionally long representation
 # requires evaluating the corresponding exact upper endpoint.
-function _check_shpilka_index(s::ShpilkaScheme, term, leg, coordinate)
+function _check_shpilka_index(s, term, leg, coordinate)
     1 <= leg <= 3 || throw(BoundsError(1:3, leg))
     term >= 1 && coordinate >= 1 || throw(BoundsError(s, (term, leg, coordinate)))
     p, m = s.derivation.parameters, s.program.copies
@@ -238,9 +242,7 @@ function _check_shpilka_index(s::ShpilkaScheme, term, leg, coordinate)
     return nothing
 end
 
-function scheme_coefficient(
-    s::ShpilkaScheme, term::Integer, leg::Integer, coordinate::Integer
-)
+function scheme_coefficient(s::ShpilkaScheme, term, leg, coordinate)
     _check_shpilka_index(s, term, leg, coordinate)
     return ShpilkaCoefficient(s, big(term), Int(leg), big(coordinate))
 end

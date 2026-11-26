@@ -21,7 +21,9 @@
         NineFourths.DerivationNode(1, 3, 3 // 1, :baseline, ()),
         NineFourths.DerivationNode(1, 2, 2 // 1, :midpoint, (1, 2)),
     ]
-    witness = NineFourths.compile_witness(nodes, 1; admissible_order=isodd)
+    witness = NineFourths.compile_witness(
+        Iterators.Stateful(nodes), 1; admissible_order=isodd
+    )
     @test witness.side == 2
     test_midpoint_tensor_identity(witness; embed, zero_weight=zero(field))
 end

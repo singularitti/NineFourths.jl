@@ -1,13 +1,19 @@
 """
 One leg of a tensor restriction. Columns label source variables and rows
 label target variables. Entries and dimensions stay exact.
+
+`entry(row, col)` returns a coefficient. The optional `support(row)` yields
+`(column, coefficient)` pairs whose contributions add up to the row. The
+optional `selection(row)` identifies the sole column with coefficient one,
+or returns zero for an all-zero row. Callbacks receive `BigInt` indices.
 """
 struct LegMap
     in_dim::BigInt
     out_dim::BigInt
-    entry::Function
-    support::Union{Nothing,Function}
-    selection::Union{Nothing,Function}
+    # Keep the map type fixed as composition and products capture other maps.
+    entry
+    support
+    selection
     function LegMap(in_dim, out_dim, entry, support=nothing, selection=nothing)
         in_dim >= 1 && out_dim >= 1 || throw(ArgumentError("empty tensor leg"))
         return new(big(in_dim), big(out_dim), entry, support, selection)
@@ -22,12 +28,14 @@ function Base.getindex(m::LegMap, row::Integer, col::Integer)
     return m.entry(big(row), big(col))
 end
 
-function row_entries(m::LegMap, row::Integer)
+"""Iterate the `(column, coefficient)` contributions to a one-based row of a leg map."""
+function row_entries(m, row::Integer)
     1 <= row <= m.out_dim || throw(BoundsError(m, row))
-    isnothing(m.support) || return m.support(big(row))
+    row_index = big(row)
+    isnothing(m.support) || return m.support(row_index)
     return (
         (col, weight) for col in 1:m.in_dim for
-        weight in (m.entry(row, col),) if !iszero(weight)
+        weight in (m.entry(row_index, col),) if !iszero(weight)
     )
 end
 
@@ -51,8 +59,8 @@ struct TensorRestriction
 end
 
 TensorRestriction(x::LegMap, y::LegMap, z::LegMap) = TensorRestriction((x, y, z))
-source_dims(r::TensorRestriction) = map(m -> m.in_dim, r.legs)
-target_dims(r::TensorRestriction) = map(m -> m.out_dim, r.legs)
+source_dims(restriction) = map(m -> m.in_dim, restriction.legs)
+target_dims(restriction) = map(m -> m.out_dim, restriction.legs)
 unit_dims(k::Integer) = (big(k), big(k), big(k))
 mm_dims(k::Integer) = unit_dims(big(k)^2)
 
@@ -60,13 +68,14 @@ function identity_restriction(dims)
     return TensorRestriction(ntuple(i -> selection_map(dims[i], dims[i], identity), 3))
 end
 
-function _compose_maps(a::LegMap, b::LegMap)
+"""Apply `a` first and `b` second, matching the intervening leg dimensions."""
+function _compose_maps(a, b)
     a.out_dim == b.in_dim ||
         throw(DimensionMismatch("tensor restriction endpoints do not match"))
     if !isnothing(a.selection) && !isnothing(b.selection)
         function source_col(row)
             mid = b.selection(row)
-            return iszero(mid) ? 0 : a.selection(mid)
+            return iszero(mid) ? 0 : a.selection(big(mid))
         end
         return selection_map(a.in_dim, b.out_dim, source_col)
     end
@@ -98,7 +107,8 @@ function compose_restrictions(
     return isempty(rest) ? composed : foldl(compose_restrictions, rest; init=composed)
 end
 
-function _product_maps(a::LegMap, b::LegMap)
+"""Tensor two leg maps with the coordinates of the first factor varying fastest."""
+function _product_maps(a, b)
     src, dst = a.in_dim * b.in_dim, a.out_dim * b.out_dim
     if !isnothing(a.selection) && !isnothing(b.selection)
         function source_col(row)
@@ -143,9 +153,11 @@ function power_restriction(r::TensorRestriction, n::Integer)
     return iseven(n) ? square : product_restriction(square, r)
 end
 
-# All products use first-factor-fastest coordinates, including tensor powers.
+"""Permute an iterable of leg-dimension triples in first-factor-fastest coordinates."""
 function permute_factors(dimensions, order)
-    sort(collect(order)) == collect(1:length(dimensions)) ||
+    dimensions = collect(dimensions)
+    order = collect(order)
+    length(order) == length(dimensions) && isperm(order) ||
         throw(ArgumentError("invalid permutation of tensor factors"))
     legs = ntuple(3) do leg
         dims = [big(d[leg]) for d in dimensions]

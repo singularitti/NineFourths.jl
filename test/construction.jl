@@ -7,6 +7,9 @@
     @test default.derivation.parameters.target == 5//2
     @test default.derivation.parameters.a == big(2)^264
     @test multiplication_scheme(23//10).derivation.parameters.q == 6400
+    @test multiplication_scheme(Nemo.QQ(5//2)).derivation.parameters.target == 5//2
+    @test multiplication_scheme(Nemo.ZZ(3)).derivation.parameters.target == 3
+    @test_throws MethodError multiplication_scheme(2.5)
     @test_throws DomainError multiplication_scheme(9//4)
     @test_throws DomainError multiplication_scheme(2)
     @test_throws MethodError multiplication_scheme(; target_exponent=5//2)

@@ -8,7 +8,7 @@ struct _WitnessEvent
     side::BigInt
 end
 
-function _witness_events(nodes, N::Integer)
+function _witness_events(nodes, N)
     N >= 1 || throw(ArgumentError("the witness power must be positive"))
     isempty(nodes) && throw(ArgumentError("a witness needs a derivation"))
     demand = fill(big(0), length(nodes))
@@ -66,6 +66,8 @@ end
 
 Calculate the matrix side in Lemma 6.2 without instantiating restriction maps.
 This evaluates the binomial and multinomial multiplicities and the final power.
+Supply a one-based indexed sequence of derivation entries in dependency order
+and a positive integer power `N`.
 """
 witness_side(nodes, N::Integer) = _witness_events(nodes, N).side^(big(N)^2)
 
@@ -607,6 +609,10 @@ performed separately on the two phases of each sector transition after taking
 the Nth tensor power. The powered auxiliary tensor is prepared once, returned
 by each of N applications, and then restricted to a scalar.
 
+Supply a finite iterable of `DerivationNode` entries in dependency order and a
+positive integer power `N`. An integer `step_bound` must be at least the number
+of non-baseline entries.
+
 Supply an `admissible_order` predicate to choose Fourier orders invertible in
 a coefficient field. This also interpolates every phase at roots of unity.
 """
@@ -614,11 +620,12 @@ function compile_witness(
     nodes, N::Integer; step_bound::Union{Nothing,Integer}=nothing, admissible_order=nothing
 )
     N = big(N)
+    nodes = vec(collect(DerivationNode, nodes))
     plan = _witness_events(nodes, N)
     S = count(node -> node.kind !== :baseline, nodes)
     S_bound = isnothing(step_bound) ? big(S) : big(step_bound)
     S_bound >= S || throw(ArgumentError("the step bound is smaller than the derivation"))
-    recipe = WitnessRecipe(collect(DerivationNode, nodes), N, S_bound)
+    recipe = WitnessRecipe(nodes, N, S_bound)
     a, b = last(nodes).a, last(nodes).b
     copies = _witness_copies(S_bound, N)
     if iszero(S_bound)

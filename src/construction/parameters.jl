@@ -10,12 +10,13 @@ function Base.show(io::IO, value::ScaledPowerOfTwo)
     return print(io, value.coefficient, " * 2^", value.exponent)
 end
 
-function _scaled_power_of_two(coefficient::BigInt, exponent::BigInt)
+function _scaled_power_of_two(coefficient::Integer, exponent::Integer)
+    coefficient = BigInt(coefficient)
     # The cutoff controls storage only. The factored value is also exact.
     return if exponent <= 4096
         coefficient << Int(exponent)
     else
-        ScaledPowerOfTwo(coefficient, exponent)
+        ScaledPowerOfTwo(coefficient, BigInt(exponent))
     end
 end
 
@@ -37,9 +38,10 @@ struct ShpilkaParameters
     a::Union{BigInt,ScaledPowerOfTwo}
     step_bound::BigInt
     length_bound::Union{BigInt,ScaledPowerOfTwo}
-    function ShpilkaParameters(target::Union{Integer,Rational})
-        isfinite(target) || throw(DomainError(target, "the target exponent must be finite"))
-        exact_target = Rational{BigInt}(target)
+    function ShpilkaParameters(target)
+        exact_target = rational_result(target)
+        isfinite(exact_target) ||
+            throw(DomainError(target, "the target exponent must be finite"))
         exact_target > _OPENAI_EXPONENT_BOUND ||
             throw(DomainError(target, "the target exponent must be greater than 9/4"))
         epsilon = min(exact_target - _OPENAI_EXPONENT_BOUND, one(exact_target))

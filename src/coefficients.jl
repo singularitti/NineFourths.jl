@@ -9,11 +9,11 @@ end
 
 const ExactScalar = Union{Rational{BigInt},PhaseSum,Nemo.QQBarFieldElem}
 
-to_exact(value::Integer) = BigInt(value) // 1
+to_exact(value::Union{Integer,Nemo.ZZRingElem}) = BigInt(value) // 1
 to_exact(value::Rational) = Rational{BigInt}(value)
 to_exact(value::Union{PhaseSum,Nemo.QQBarFieldElem}) = value
 
-rational_result(value::JuliaRational) = to_exact(value)
+rational_result(value::Union{JuliaRational,Nemo.ZZRingElem}) = to_exact(value)
 
 function rational_result(value::Nemo.QQFieldElem)
     return BigInt(numerator(value)) // BigInt(denominator(value))
@@ -63,7 +63,8 @@ end
 phase_terms(value::PhaseSum) = value.terms
 phase_terms(value::JuliaRational) = ((zero(Rational{BigInt}), to_exact(value)),)
 
-function add_phases(left::PhaseSum, right)
+"""Add the terms yielded by `phase_terms(right)` to a copy of the left operand's terms."""
+function add_phases(left, right)
     terms = copy(left.terms)
     for (phase, weight) in phase_terms(right)
         add_phase!(terms, phase, weight)
@@ -123,7 +124,8 @@ function phase_trace(phase, traces)
     end
 end
 
-function phase_squared_norm(value::PhaseSum, traces)
+"""Return the normalized field trace of `|value|²`, caching traces of roots of unity."""
+function phase_squared_norm(value, traces)
     return sum(value.terms; init=zero(Rational{BigInt})) do (phase, weight)
         sum(value.terms; init=zero(Rational{BigInt})) do (other_phase, other_weight)
             return weight * other_weight * phase_trace(phase - other_phase, traces)
@@ -168,7 +170,8 @@ function as_qqbar(value::PhaseSum)
     end
 end
 
-function with_qqbar(op, left::PhaseSum, right::Nemo.QQBarFieldElem)
+"""Apply `op` in the algebraic closure when `right` has no rational representation."""
+function with_qqbar(op, left, right)
     return if Nemo.is_rational(right)
         op(left, rational_result(right))
     else

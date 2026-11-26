@@ -98,10 +98,22 @@ function _classical_fallback(inputs)
 end
 
 """
-    multiply(A, B, scheme::BilinearScheme; fallback=:error, field=nothing,
+    multiply(A, B, scheme; fallback=:error, field=nothing,
              max_coefficient_visits=10_000_000, max_workspace_entries=10_000_000)
 
 Multiply an `m×k` matrix by a `k×n` matrix and return a dense Julia matrix.
+Each input supplies two dimensions through `size(M)` and scalar entries
+through `M[i, j]`. The row and column indices come from `axes(M)`, which
+defaults to one-based indices for each dimension. The executor uses
+`eltype(M)` and the scalar entries to infer the input field.
+
+The package's constructors return a `BilinearScheme`. A custom scheme can
+implement `NineFourths.execution_dimensions(scheme, max_side, max_rank)`,
+returning a positive integer pair `(side, rank)` within the limits or
+`nothing`. `NineFourths.scheme_coefficient(scheme, term, leg, coordinate)`
+supplies each weight, and `NineFourths.block_side(scheme)` gives the integer
+block side used in diagnostics.
+
 With an inferred domain, Julia integer inputs produce `Matrix{BigInt}` and
 Julia rational inputs produce `Matrix{Rational{BigInt}}`. Other inputs use
 their common scalar field. Pass `field` to supply a parent, scalar type, or
@@ -118,9 +130,9 @@ The workspace budget bounds live dense matrix entries, including normalized
 inputs and the result. The workspace budget also applies to classical fallback.
 """
 function multiply(
-    A::FieldMatrix,
-    B::FieldMatrix,
-    scheme::BilinearScheme;
+    A,
+    B,
+    scheme;
     fallback=:error,
     field=nothing,
     max_coefficient_visits::Integer=DEFAULT_COEFFICIENT_VISITS,
@@ -133,13 +145,11 @@ function multiply(
         throw(ArgumentError("max_coefficient_visits must be nonnegative"))
     max_workspace_entries >= 0 ||
         throw(ArgumentError("max_workspace_entries must be nonnegative"))
-    m, k = size(A)
-    right_rows, n = size(B)
-    k == right_rows || throw(DimensionMismatch("input inner dimensions must match"))
-    shape = (m, k, n)
+    shape = _multiplication_shape(A, B)
+    m, _, n = shape
     if any(iszero, shape)
         _check_zero_workspace(shape, scheme, max_workspace_entries)
-        inputs = _field_inputs(A, B; field)
+        inputs = _field_inputs(A, B, shape; field)
         return _zero_matrix(inputs.eltype, m, n, inputs.zero)
     end
     plan = _execution_plan(
@@ -152,10 +162,10 @@ function multiply(
     if plan isa ExecutionInfeasible
         fallback === :classical || throw(plan)
         _check_classical_workspace(shape, scheme, max_workspace_entries)
-        inputs = _field_inputs(A, B; field)
+        inputs = _field_inputs(A, B, shape; field)
         return _classical_fallback(inputs)
     end
-    inputs = _field_inputs(A, B; field)
+    inputs = _field_inputs(A, B, shape; field)
     try
         arithmetic = _scheme_arithmetic(scheme, inputs)
         adapted, domain = arithmetic.scheme, arithmetic.domain

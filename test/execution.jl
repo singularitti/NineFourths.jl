@@ -1,3 +1,11 @@
+struct TestScalarScheme end
+
+NineFourths.block_side(::TestScalarScheme) = 1
+NineFourths.scheme_coefficient(::TestScalarScheme, term, leg, coordinate) = 1
+function NineFourths.execution_dimensions(::TestScalarScheme, max_side, max_rank)
+    return min(max_side, max_rank) >= 1 ? (1, 1) : nothing
+end
+
 @testset "Exact matrix multiplication" begin
     # Strassen's seven products. Rows are the column-major block coordinates.
     U = [1 0 1 0 1 -1 0; 0 1 0 0 0 1 0; 0 0 0 0 1 0 1; 1 1 0 1 0 0 -1]
@@ -26,9 +34,15 @@
         C = NineFourths.multiply(view(A, :, :), B, strassen)
         @test C isa Matrix{Rational{BigInt}}
         @test C == Rational{BigInt}.(A) * BigInt.(B)
+        @test NineFourths.multiply(TestMatrixLike(A), B, strassen) == C
+        @test NineFourths.multiply(TestMatrixLike(A), TestMatrixLike(B), strassen) == C
 
         single = NineFourths.explicit_scheme([2;;], [3;;], [1//6;;])
         @test NineFourths.multiply(A, B, single) == C
+        @test multiply(A, B, TestScalarScheme()) == C
+        @test_throws NineFourths.ExecutionInfeasible multiply(
+            A, B, TestScalarScheme(); max_coefficient_visits=0
+        )
 
         algebraic_U = Matrix{NineFourths.ExactScalar}(Rational{BigInt}.(U))
         algebraic_V = Matrix{NineFourths.ExactScalar}(Rational{BigInt}.(V))
@@ -86,6 +100,12 @@
         @test_throws DimensionMismatch NineFourths.multiply(
             A[:, 1:2], B[:, 1:2], strassen; fallback=:classical
         )
+        for invalid in (1, [1, 2, 3], reshape(B, 3, 3, 1))
+            @test_throws DimensionMismatch NineFourths.multiply(invalid, B, strassen)
+            @test_throws DimensionMismatch NineFourths.multiply(
+                A, invalid, strassen; fallback=:classical
+            )
+        end
         @test NineFourths.multiply(
             Float64.(A), B, strassen; fallback=:classical, max_coefficient_visits=0
         ) == Float64.(expected)

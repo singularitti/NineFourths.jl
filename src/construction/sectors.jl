@@ -24,7 +24,7 @@ function tripling_transition(a::Integer, b::Integer, j0::Integer, j1::Integer, j
 end
 
 _is_midpoint(::SectorTransition{K}) where {K} = K == 2
-_sector_copies(transition::SectorTransition) = sum(transition.sector_type.counts)
+_sector_copies(transition) = sum(transition.sector_type.counts)
 
 function transition_degree(transition::SectorTransition, stage::Integer)
     M = transition.sector_type.multiplicity

@@ -32,7 +32,8 @@ scheme[1, 2, 1]                               # term 1, right input, coordinate 
 
 The matrix multiplication exponent is an infimum. For a target `t > 9//4`,
 the package chooses a finite construction with certified arithmetic exponent at
-most `t`. Use an exact integer or rational for `t`. The default `5//2` asks for
+most `t`. The target accepts exact integers and rationals, including elements
+of Nemo's `ZZ` and `QQ`. The default `5//2` asks for
 an $O(n^{5/2})$ algorithm. Moving the target closer to `9//4` increases the
 construction parameters. The endpoint itself has no finite parameter choice in
 this construction.
@@ -42,6 +43,8 @@ term it forms one linear combination of the left blocks and one of the right
 blocks, multiplies them, then weights that product into each output block.
 Scheme coordinates are one-based and follow Julia's column-major order.
 To use coefficient tables of your own, pass them to `BilinearScheme(U, V, W)`.
+Each table must have one-based axes, `u²` rows and one column per product.
+The scheme reads entries as `table[row, term]` and keeps the original tables.
 The `NineFourths.ShpilkaScheme` returned by `multiplication_scheme` stores the
 operations that generate its coefficients. Indexing it returns a deferred
 `NineFourths.ShpilkaCoefficient`.
@@ -65,7 +68,10 @@ field, the default raises an exception. `fallback=:classical` permits an
 ordinary product in the same field. In the example, the default Shpilka scheme
 exceeds the index limit, so this explicit fallback computes the result.
 
-The executor accepts Julia `AbstractMatrix` containers and Nemo matrices.
+The executor accepts Julia `AbstractMatrix` values, Nemo matrices, and other
+containers with a two-dimensional `size(M)` and scalar indexing `M[i, j]`. It reads
+rows and columns in the order given by `axes(M)` and uses `eltype(M)` and the
+entries to infer the field.
 The two inputs must share a field or admit a common scalar representation.
 Native field elements retain their arithmetic and parent. Supported examples
 include Nemo prime fields, finite extensions, algebraic number fields and
@@ -123,6 +129,10 @@ The original upper-bound proof gives the underlying tensor restrictions and
 their conversion to matrix multiplication algorithms. [OpenAI, *An Upper Bound of 9/4 for the Matrix Multiplication Exponent* (2026)](https://github.com/openai/math/blob/main/preprints/Matrix-Multiplication-Nine-Fourths-October-2-2026/build/paper.tex).
 
 ## Questions and contributions
+
+Document the operations each argument needs and give typical input types in
+the docstring. Use argument annotations when they select an implementation
+or enforce a mathematical requirement, such as an integer tensor power.
 
 You can post usage questions on
 [our discussion page](https://github.com/singularitti/NineFourths.jl/discussions).

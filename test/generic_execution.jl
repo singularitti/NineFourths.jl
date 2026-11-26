@@ -2,7 +2,7 @@
 # lack zero(T), one(T), conversion to Julia numbers, and array multiplication.
 struct TestValueRational
     value::Rational{BigInt}
-    TestValueRational(value::Rational{BigInt}) = new(value)
+    TestValueRational(value::Rational) = new(value)
 end
 
 test_value_q(n::Integer, d::Integer=1) = TestValueRational(big(n) // big(d))
@@ -34,7 +34,7 @@ Base.iszero(x::TestValueResidue) = iszero(x.value)
 Base.inv(x::TestValueResidue) = x.field(invmod(x.value, x.field.modulus))
 Base.:-(x::TestValueResidue) = x.field(-x.value)
 
-function test_residue_binary(op, x::TestValueResidue, y::TestValueResidue)
+function test_residue_binary(op, x, y)
     x.field == y.field || throw(ArgumentError("incompatible residue parents"))
     return x.field(op(x.value, y.value))
 end
@@ -49,9 +49,10 @@ end
 
 struct TestIntegerResidue <: Integer
     value::Int
-    TestIntegerResidue(value::Int) = new(mod(value, 5))
+    TestIntegerResidue(value::Integer) = new(mod(value, 5))
 end
 
+TestIntegerResidue(x::TestIntegerResidue) = x
 Base.zero(::TestIntegerResidue) = TestIntegerResidue(0)
 Base.one(::TestIntegerResidue) = TestIntegerResidue(1)
 Base.iszero(x::TestIntegerResidue) = iszero(x.value)
@@ -74,7 +75,7 @@ Base.:(==)(x::TestIntegerResidue, y::TestIntegerResidue) = x.value == y.value
 
 struct TestCallableScalar
     value::Int
-    TestCallableScalar(value::Int) = new(mod(value, 5))
+    TestCallableScalar(value::Integer) = new(mod(value, 5))
 end
 
 Base.inv(x::TestCallableScalar) = TestCallableScalar(invmod(x.value, 5))
@@ -268,6 +269,7 @@ end
     C = multiply(A, B, scheme)
     @test C == field_product_reference(A, B, zero(F))
     @test C isa Matrix{typeof(zero(F))}
+    @test multiply(TestMatrixLike(A), B, scheme) == C
     mixed = Any[F(1) 2 F(0); 4 F(3) 1//1]
     @test multiply(mixed, B, scheme) == C
     incompatible = copy(A)
@@ -298,6 +300,7 @@ end
     @test_throws Union{ArgumentError,DomainError} multiply(left, right, scheme)
     for (left, right, keywords) in (
         (left, right, (; field=F)),
+        (TestMatrixLike(left), right, (; field=F)),
         (Nemo.zero_matrix(F, 3, 0), Nemo.zero_matrix(F, 0, 5), (;)),
     )
         zero_product = multiply(left, right, scheme; keywords...)
@@ -323,9 +326,11 @@ end
 
 @testset "Custom scalar identity and widening rules" begin
     scheme = generic_strassen(; scaled=true)
+    residue = TestIntegerResidue(Int16(7))
+    @test TestIntegerResidue(residue) === residue
     variants = (
         (TestIntegerResidue, (;)),
-        (TestCallableScalar, (; field=n -> TestCallableScalar(Int(n)))),
+        (TestCallableScalar, (; field=n -> TestCallableScalar(n))),
     )
     @testset "$element" for (element, kwargs) in variants
         A = [element(i - 2j) for i in 1:3, j in 1:2]
@@ -345,6 +350,9 @@ end
     C = multiply(A, B, scheme; fallback=:classical, max_coefficient_visits=0)
     @test C isa Matrix{Rational{BigInt}}
     @test C == expected
+    @test multiply(
+        A, TestMatrixLike(B), scheme; fallback=:classical, max_coefficient_visits=0
+    ) == expected
 end
 
 @testset "Native float and complex arithmetic" begin
@@ -402,7 +410,7 @@ end
         @test multiply(left, [a;;], scalar) == [a / 2;;]
     end
     F = Nemo.GF(5)
-    native_weights = BilinearScheme([F(2);;], [one(F);;], [F(3);;])
+    native_weights = BilinearScheme(Nemo.matrix(F, [F(2);;]), [one(F);;], [F(3);;])
     @test verify_scheme(native_weights).valid
     wrong_weights = BilinearScheme([F(2);;], [one(F);;], [F(4);;])
     @test !verify_scheme(wrong_weights).valid
