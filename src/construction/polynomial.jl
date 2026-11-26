@@ -3,6 +3,7 @@ const LEG_PERMUTATIONS = ((1, 2, 3), (3, 1, 2), (2, 3, 1), (2, 1, 3), (3, 2, 1),
 
 struct PolynomialDecomposition
     dimensions::NTuple{3,BigInt}
+    order::BigInt
 end
 
 function polynomial_dims(a::Integer, b::Integer)
@@ -11,13 +12,27 @@ function polynomial_dims(a::Integer, b::Integer)
     return (first, second, first + second - 1)
 end
 
-"""Theorem 3.1, with evaluation and exact interpolation at all `(a+b-1)`-th roots of unity."""
-function polynomial_decomposition(a::Integer, b::Integer)
-    return PolynomialDecomposition(polynomial_dims(a, b))
+function _sample_order(admissible_order, preferred, alternate)
+    isnothing(admissible_order) && return preferred
+    admissible_order(preferred) && return preferred
+    admissible_order(alternate) && return alternate
+    throw(ArgumentError("neither root-of-unity order is invertible in the coefficient field"))
+end
+
+"""
+Theorem 3.1 using roots of unity for evaluation and interpolation. The
+optional `admissible_order` predicate chooses an invertible order from
+`a+b-1` and `a+b`. Both orders exceed the degree of the product.
+"""
+function polynomial_decomposition(a::Integer, b::Integer; admissible_order=nothing)
+    dimensions = polynomial_dims(a, b)
+    minimum_order = dimensions[3]
+    order = _sample_order(admissible_order, minimum_order, minimum_order + 1)
+    return PolynomialDecomposition(dimensions, order)
 end
 
 Base.size(decomposition::PolynomialDecomposition) = decomposition.dimensions
-rank_count(decomposition::PolynomialDecomposition) = size(decomposition)[3]
+rank_count(decomposition::PolynomialDecomposition) = decomposition.order
 
 function rank_coefficient(
     decomposition::PolynomialDecomposition, term::Integer, leg::Integer, coordinate::Integer
@@ -43,9 +58,9 @@ function seed_dims(a::Integer, b::Integer)
 end
 
 """Rank decomposition of `Q(a,b)⊗m` with the first tensor factor varying fastest."""
-function seed_decomposition(a::Integer, b::Integer, m::Integer=1)
+function seed_decomposition(a::Integer, b::Integer, m::Integer=1; admissible_order=nothing)
     m >= 0 || throw(ArgumentError("the number of seed copies must be nonnegative"))
-    polynomial = polynomial_decomposition(a, b)
+    polynomial = polynomial_decomposition(a, b; admissible_order)
     copies = BigInt(m)
     dimensions = map(dimension -> dimension^copies, seed_dims(a, b))
     return SeedDecomposition(polynomial, copies, dimensions, rank_count(polynomial)^(6copies))

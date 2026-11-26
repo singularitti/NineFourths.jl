@@ -70,7 +70,7 @@ witness_side(nodes, N::Integer) = _witness_events(nodes, N).side^(big(N)^2)
 
 # Preparation costs 16SN². Each reuse costs N² seeds plus at most 18SN
 # seeds: 6N for the unit credit and at most 6N for each interpolation phase
-# per derivation step. The latter follows from 6N*9^N + 1 ≤ 64^N.
+# per derivation step. The latter follows from 6N*9^N + 2 ≤ 64^N.
 _witness_copies(S, N) = big(N)^3 + 34big(S) * big(N)^2
 
 const _WitnessTag = Tuple{Symbol,Int}
@@ -278,24 +278,39 @@ function _draw_unit!(layout, budget, remaining, dimension, tag, a, b)
     return after
 end
 
-# Evaluate the same point at every copy of this phase, then extract the
-# constant term. For samples 1,…,D+1 the weights at zero are signed binomials.
-function _interpolated_phase(transition, phase, N)
+# Evaluate the same point at every copy of this phase. For samples 1,…,D+1
+# the constant-term weights are signed binomials. Over a field of arbitrary
+# characteristic, use the mean of evaluations at Lth roots with L > D.
+function _interpolated_phase(transition, phase, N; admissible_order=nothing)
     degree = N * transition_degree(transition, phase)
-    sample = transition_restriction(transition, phase, big(1))
+    points = iszero(degree) ? big(1) : _sample_order(admissible_order, degree + 1, degree + 2)
+    use_roots = !isnothing(admissible_order)
+    evaluate = if use_roots
+        M = transition.sector_type.multiplicity
+        separation = _sample_order(admissible_order, 2M, 2M - 1)
+        parameter -> transition_restriction(transition, phase, parameter;
+                                            admissible_order=separation)
+    else
+        parameter -> transition_restriction(transition, phase, parameter)
+    end
+    sample = evaluate(big(1))
     src, dst = _power_dims(source_dims(sample), N), _power_dims(target_dims(sample), N)
-    points = degree + 1
     if points == 1
         return (; points, restriction=power_restriction(sample, N))
     end
+    sample_at(point) = evaluate(use_roots ? root_of_unity(points, point) : point)
     restriction = TensorRestriction(ntuple(3) do leg
         source_radix, target_radix = source_dims(sample)[leg], target_dims(sample)[leg]
-        weight_at(point) = leg == 1 ? (isodd(point) ? 1 : -1) * binomial(points, point) : big(1)
+        function weight_at(point)
+            leg != 1 && return big(1)
+            use_roots && return big(1) // points
+            return (isodd(point) ? 1 : -1) * binomial(points, point)
+        end
         function coefficient(row, col)
             c, point = divrem(big(col) - 1, points)
             point += 1
             r = big(row) - 1
-            evaluated = transition_restriction(transition, phase, point).legs[leg]
+            evaluated = sample_at(point).legs[leg]
             weight = weight_at(point)
             for _ in 1:N
                 r, i = divrem(r, target_radix)
@@ -308,7 +323,7 @@ function _interpolated_phase(transition, phase, N)
         end
         function entries(row)
             function sample_rows(point)
-                evaluated = power_restriction(transition_restriction(transition, phase, point), N)
+                evaluated = power_restriction(sample_at(point), N)
                 weight = weight_at(point)
                 return ((point + points * (col - 1), weight * value)
                         for (col, value) in row_entries(evaluated.legs[leg], row))
@@ -353,7 +368,7 @@ function _auxiliary_wires(nodes, events, N)
     return wires, rank_maps
 end
 
-function _compile_sector!(layout, nodes, event, N, remaining, a, b)
+function _compile_sector!(layout, nodes, event, N, remaining, a, b, admissible_order=nothing)
     i, k, M = event.index, event.copies, event.multiplicity
     node = nodes[i]
     midpoint = node.kind === :midpoint
@@ -385,7 +400,7 @@ function _compile_sector!(layout, nodes, event, N, remaining, a, b)
     end
 
     phase = (:phase, i)
-    first_phase = _interpolated_phase(transition, 1, N)
+    first_phase = _interpolated_phase(transition, 1, N; admissible_order)
     remaining = _draw_unit!(layout, budget, remaining, first_phase.points, phase, a, b)
     group = product_restriction(identity_restriction(unit_dims(first_phase.points)),
                                 _replica_order(input_factors, N))
@@ -394,7 +409,7 @@ function _compile_sector!(layout, nodes, event, N, remaining, a, b)
     _replace_wires!(layout, vcat([phase], input_tags), [_wire(middle, target_dims(first_map))],
                     first_map)
 
-    second_phase = _interpolated_phase(transition, 2, N)
+    second_phase = _interpolated_phase(transition, 2, N; admissible_order)
     remaining = _draw_unit!(layout, budget, remaining, second_phase.points, phase, a, b)
     output_factors = [unit_dims(M^6)]
     output_tags = [unit]
@@ -423,7 +438,7 @@ function _compile_sector!(layout, nodes, event, N, remaining, a, b)
     return remaining
 end
 
-function _compile_round(nodes, plan, auxiliary, N, S)
+function _compile_round(nodes, plan, auxiliary, N, S, admissible_order=nothing)
     last_node = last(nodes)
     a, b = last_node.a, last_node.b
     starting = (:q, length(nodes))
@@ -441,7 +456,7 @@ function _compile_round(nodes, plan, auxiliary, N, S)
             fallback = true
             break
         elseif node.kind === :midpoint || node.kind === :tripling
-            allowance = _compile_sector!(layout, nodes, event, N, allowance, a, b)
+            allowance = _compile_sector!(layout, nodes, event, N, allowance, a, b, admissible_order)
             push!(executed, event)
         else
             predecessor = only(node.predecessors)
@@ -504,39 +519,53 @@ function _compile_round(nodes, plan, auxiliary, N, S)
     return _combine_restrictions(compose_restrictions, layout.stages)
 end
 
+struct WitnessRecipe
+    nodes::Vector{DerivationNode}
+    power::BigInt
+    step_bound::BigInt
+end
+
 struct CompiledWitness
     side::BigInt
     copies::BigInt
     restriction::TensorRestriction
+    recipe::Union{Nothing,WitnessRecipe}
 end
 
+CompiledWitness(side, copies, restriction) = CompiledWitness(side, copies, restriction, nothing)
+
 """
-    compile_witness(nodes, N; step_bound=nothing)
+    compile_witness(nodes, N; step_bound=nothing, admissible_order=nothing)
 
 Lower a derivation to the exact restriction in Lemma 6.2. Interpolation is
 performed separately on the two phases of each sector transition after taking
 the Nth tensor power. The powered auxiliary tensor is prepared once, returned
 by each of N applications, and then restricted to a scalar.
+
+Supply an `admissible_order` predicate to choose Fourier orders invertible in
+a coefficient field. This also interpolates every phase at roots of unity.
 """
-function compile_witness(nodes, N::Integer; step_bound::Union{Nothing,Integer}=nothing)
+function compile_witness(nodes, N::Integer; step_bound::Union{Nothing,Integer}=nothing,
+                         admissible_order=nothing)
     N = big(N)
     plan = _witness_events(nodes, N)
     S = count(node -> node.kind !== :baseline, nodes)
     S_bound = isnothing(step_bound) ? big(S) : big(step_bound)
     S_bound >= S || throw(ArgumentError("the step bound is smaller than the derivation"))
+    recipe = WitnessRecipe(collect(DerivationNode, nodes), N, S_bound)
     a, b = last(nodes).a, last(nodes).b
     copies = _witness_copies(S_bound, N)
     if iszero(S_bound)
         side = max(a, b)^2
         restriction = compose_restrictions(power_restriction(seed_baseline(a, b), copies),
                                             _matrix_power(side, copies))
-        return CompiledWitness(side^copies, copies, restriction)
+        return CompiledWitness(side^copies, copies, restriction, recipe)
     end
     seed = seed_dims(a, b)
     auxiliary, rank_maps = _auxiliary_wires(nodes, plan.events, N)
     prepare_copies = 16S_bound * N^2
     batch_copies = N^2 + 18S_bound * N
-    round = _compile_round(nodes, plan, auxiliary, N, S_bound)
+    round = _compile_round(nodes, plan, auxiliary, N, S_bound, admissible_order)
     round_side = plan.side^N
 
     raw, result = (:raw, 0), (:accumulator, 0)
@@ -571,5 +600,5 @@ function compile_witness(nodes, N::Integer; step_bound::Union{Nothing,Integer}=n
     restriction = _combine_restrictions(compose_restrictions, layout.stages)
     @assert source_dims(restriction) == _power_dims(seed, copies)
     @assert target_dims(restriction) == mm_dims(side)
-    return CompiledWitness(side, copies, restriction)
+    return CompiledWitness(side, copies, restriction, recipe)
 end

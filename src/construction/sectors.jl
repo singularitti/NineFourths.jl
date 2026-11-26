@@ -90,7 +90,7 @@ function _sector_dot_axis(leg, orientation)
 end
 
 function _sector_first_value(transition, local_leg, dot_copy, source, target, t)
-    value = Ref(zero(t))
+    value = Ref{ExactScalar}(zero(t))
     record = function (coordinate, coefficient)
         coordinate == target && (value[] = coefficient)
         return nothing
@@ -162,7 +162,7 @@ function _sector_first_leg(transition, leg, t)
         value = one(t)
         source_stride = units
         matrix_strides = [units * source_q, units * source_q * dot_size]
-        alternatives = NTuple{2,Tuple{BigInt,Rational{BigInt}}}[]
+        alternatives = NTuple{2,Tuple{BigInt,ExactScalar}}[]
         for _ in 1:count, orientation in 1:6
             new, digit = divrem(new, middle_radices[orientation])
             local_leg = LEG_PERMUTATIONS[orientation][leg]
@@ -235,11 +235,14 @@ function _sector_source_coordinates!(input_coordinates, transition, local_leg,
     return nothing
 end
 
-function _sector_second_leg(transition, leg, t)
+function _sector_second_leg(transition, leg, t, L)
     count = _sector_copies(transition)
     sector_type = transition.sector_type
     M = sector_type.multiplicity
-    input_units = (2M)^6
+    physical_order = 2M
+    input_units = physical_order^6
+    copy_strides = ntuple(i -> physical_order^(i - 1), 6)
+    active_digits = Iterators.product(ntuple(_ -> 0:(L - 1), 6)...)
     output_units = M^6
     middle_radices = _sector_middle_radices(transition, leg)
     output_radices = ntuple(length(sector_type.counts)) do sector
@@ -289,50 +292,54 @@ function _sector_second_leg(transition, leg, t)
         end
         return (input_q, phases, weight)
     end
-    function phase_coefficient(copy_unit, phases, scale)
-        phase = big(0)
-        for orientation in 1:6
-            copy_unit, ρ = divrem(copy_unit, 2M)
-            phase += ρ * phases[orientation]
-        end
-        return iszero(mod(phase, 2M)) ? scale : root_of_unity(2M, phase) * scale
+    function phase_coefficient(digits, phases, scale)
+        phase = sum(digits[i] * phases[i] for i in 1:6)
+        return iszero(mod(phase, L)) ? scale : root_of_unity(L, phase) * scale
     end
     function coefficient(target_row, source_column)
         old, copy_unit = divrem(source_column - 1, input_units)
+        digits = ntuple(i -> div(copy_unit, copy_strides[i]) % physical_order, 6)
+        any(>=(L), digits) && return zero(t)
         input_q, phases, weight = row_parameters(target_row)
         old == input_q || return zero(t)
         # Each global leg is the local third leg in exactly two orientations.
-        scale = t^weight / (2M)^2
-        return phase_coefficient(copy_unit, phases, scale)
+        scale = t^weight / L^2
+        return phase_coefficient(digits, phases, scale)
     end
     function entries(target_row)
         input_q, phases, weight = row_parameters(target_row)
-        scale = t^weight / (2M)^2
-        return ((input_q * input_units + copy + 1, phase_coefficient(copy, phases, scale))
-                for copy in 0:(input_units - 1))
+        scale = t^weight / L^2
+        base_column = input_q * input_units + 1
+        return ((base_column + sum(digits[i] * copy_strides[i] for i in 1:6),
+                 phase_coefficient(digits, phases, scale)) for digits in active_digits)
     end
     return LegMap(source_dim, target_dim, coefficient, entries)
 end
 
 """
-    transition_restriction(transition, stage, t)
+    transition_restriction(transition, stage, t; admissible_order=nothing)
 
-Return the variable substitutions at a nonzero rational parameter for one
+Return the variable substitutions at a nonzero rational or phase monomial for one
 stage of Claim 6.6. Input factors are the unit tensor, the balanced seed
 copies, then the matrix tensor if needed. Output factors are the returned
 unit tensor, the child seed copies, then the matrix tensor. The shorter
 child copies come first for midpoint transitions. The intermediate space
 holds the same unit factor and the six oriented sector tensors per copy.
+The second stage uses Fourier order `2M` or `2M-1` and keeps the physical
+unit coordinates in radix `2M`. For the smaller order, the extra digit is
+discarded in each orientation as in §7.
 """
-function transition_restriction(transition::SectorTransition, stage::Integer, t)
+function transition_restriction(transition::SectorTransition, stage::Integer, t;
+                                admissible_order=nothing)
     t = evaluation_parameter(t)
-    make_leg = if stage == 1
-        _sector_first_leg
+    L = _admissible_separation_order(transition.sector_type.multiplicity,
+                                    admissible_order)
+    legs = if stage == 1
+        ntuple(leg -> _sector_first_leg(transition, leg, t), 3)
     elseif stage == 2
-        _sector_second_leg
+        ntuple(leg -> _sector_second_leg(transition, leg, t, L), 3)
     else
         throw(ArgumentError("Claim 6.6 has stages 1 and 2"))
     end
-    legs = ntuple(leg -> make_leg(transition, leg, t), 3)
     return TensorRestriction(legs...)
 end

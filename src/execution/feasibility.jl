@@ -5,22 +5,26 @@ const DEFAULT_WORKSPACE_ENTRIES = 10_000_000
     ExecutionInfeasible
 
 The requested multiplication could not run a scheme layer. `reason` identifies
-the failed check. `input_size` and `block_side` describe the input and the
-scheme, and `limit` holds the applicable resource bound when there is one.
+the failed check. `input_shape` gives `(m, k, n)` for an `m×k` by `k×n`
+product. `input_size` gives the common size for square inputs. `block_side`
+describes the scheme, and `limit` holds the relevant resource bound, if any.
 """
 struct ExecutionInfeasible{S} <: Exception
     reason::Symbol
-    input_size::Int
+    input_size::Union{Int,Nothing}
+    input_shape::NTuple{3,Int}
     block_side::S
     limit::Union{BigInt,Nothing}
 end
 
 function Base.showerror(io::IO, error::ExecutionInfeasible)
-    print(io, "cannot execute scheme for ", error.input_size, '×', error.input_size,
-          " matrices with block side ", error.block_side, ". ")
-    if error.reason === :empty_input
-        print(io, "empty matrices have no multiplication layer")
-    elseif error.reason === :matrix_size
+    m, k, n = error.input_shape
+    print(io, "cannot multiply ", m, '×', k, " by ", k, '×', n, " matrices")
+    if !isnothing(error.block_side)
+        print(io, " with requested block side ", error.block_side)
+    end
+    print(io, ". ")
+    if error.reason === :matrix_size
         print(io, "the dense matrix dimensions exceed the machine's array bounds")
     elseif error.reason === :scheme_dimensions
         _show_dimension_failure(io, error.block_side, error.limit)
@@ -54,60 +58,97 @@ function _show_dimension_failure(io::IO, side::WitnessSide, visits)
     end
 end
 
-function _execution_failure(reason, n, scheme, limit=nothing)
-    return ExecutionInfeasible(reason, n, block_side(scheme), isnothing(limit) ? nothing : big(limit))
+function _execution_failure(reason, shape, scheme, limit=nothing)
+    m, k, n = shape
+    square_side = m == k == n ? m : nothing
+    side = any(iszero, shape) ? nothing : block_side(scheme)
+    return ExecutionInfeasible(reason, square_side, shape, side,
+                               isnothing(limit) ? nothing : big(limit))
 end
 
-function _has_addressable_matrices(n)
+function _matrix_entries((m, k, n))
+    return (big(m) * k, big(k) * n, big(m) * n)
+end
+
+function _has_addressable_matrices(entries)
     bytes_per_entry = max(sizeof(Int), Base.elsize(Matrix{Rational{BigInt}}))
-    return n <= isqrt(div(typemax(Int), bytes_per_entry))
+    return maximum(entries) <= div(typemax(Int), bytes_per_entry)
 end
 
-_apply_child_layer(side, child_size) = side > 1 && child_size >= side
+_child_shape(shape, side) = map(dimension -> cld(dimension, side), shape)
+_active_blocks(shape, child) = map(cld, shape, child)
+_apply_child_layer(side, child_shape) = side > 1 && minimum(child_shape) >= side
 
-function _execution_plan(n, scheme, max_coefficient_visits, max_workspace_entries)
-    iszero(n) && return _execution_failure(:empty_input, n, scheme)
-    _has_addressable_matrices(n) || return _execution_failure(:matrix_size, n, scheme)
+# A previously specialized seed can shrink when moved into another field.
+# Use its smallest possible rank before input normalization, then enforce
+# the actual rank after selecting the Fourier orders in the common field.
+_minimum_dimensions(scheme, max_side, max_rank) = execution_dimensions(scheme, max_side, max_rank)
+function _minimum_dimensions(scheme::LoweredScheme, max_side, max_rank)
+    side = block_side(scheme)
+    side <= max_side || return nothing
+    polynomial = scheme.seed.polynomial
+    rank_count(polynomial) == size(polynomial, 3) &&
+        return execution_dimensions(scheme, max_side, max_rank)
+    rank = _bounded_power(size(polynomial, 3), 6 * scheme.seed.copies, max_rank)
+    return isnothing(rank) ? nothing : (Int(side), Int(rank))
+end
 
-    # Each nonempty layer visits at least one coordinate in each of the three legs.
+function _execution_plan(shape, scheme, max_coefficient_visits, max_workspace_entries;
+                         dimensions_for=execution_dimensions)
+    top_level_entries = _matrix_entries(shape)
+    _has_addressable_matrices(top_level_entries) || return _execution_failure(:matrix_size, shape, scheme)
+
+    # Every rank term visits at least one coordinate in each of the three legs.
     max_rank = min(typemax(Int), div(max_coefficient_visits, 3))
-    dimensions = execution_dimensions(scheme, isqrt(typemax(Int)), max_rank)
+    dimensions = dimensions_for(scheme, isqrt(typemax(Int)), max_rank)
     if isnothing(dimensions)
-        return _execution_failure(:scheme_dimensions, n, scheme, max_coefficient_visits)
+        return _execution_failure(:scheme_dimensions, shape, scheme, max_coefficient_visits)
     end
     side, rank = dimensions
     side > 0 && rank > 0 || throw(ArgumentError("a scheme needs a positive side and rank"))
 
     # The promoted inputs and scheme result coexist. During recursion each
     # active level also retains two linear forms and one child product. Output
-    # conversion uses a fourth top-level matrix after those forms are gone.
-    top_level_entries = big(n)^2
-    conversion_entries = 4 * top_level_entries
-    entries = 3 * top_level_entries
+    # conversion uses a second output matrix after those forms are gone.
+    entries = sum(top_level_entries)
+    conversion_entries = entries + last(top_level_entries)
     visits = big(0)
     calls = big(1)
-    layer_size = n
+    layer_shape = shape
     while true
-        child_size = cld(layer_size, side)
-        active_side = cld(layer_size, child_size)
-        visits += 3 * calls * rank * active_side^2
+        child = _child_shape(layer_shape, side)
+        active = _active_blocks(layer_shape, child)
+        visits += calls * rank * sum(_matrix_entries(active))
         if visits > max_coefficient_visits
-            return _execution_failure(:coefficient_visits, n, scheme, max_coefficient_visits)
+            return _execution_failure(:coefficient_visits, shape, scheme, max_coefficient_visits)
         end
-        entries += 3 * big(child_size)^2
+        entries += sum(_matrix_entries(child))
         if max(entries, conversion_entries) > max_workspace_entries
-            return _execution_failure(:workspace_entries, n, scheme, max_workspace_entries)
+            return _execution_failure(:workspace_entries, shape, scheme, max_workspace_entries)
         end
-        _apply_child_layer(side, child_size) || return (; side, rank)
-        layer_size = child_size
+        _apply_child_layer(side, child) || return (; side, rank)
+        layer_shape = child
         calls *= rank
     end
 end
 
-function _check_classical_workspace(n, scheme, max_workspace_entries)
-    _has_addressable_matrices(n) || throw(_execution_failure(:matrix_size, n, scheme))
-    if 3 * big(n)^2 > max_workspace_entries
-        throw(_execution_failure(:workspace_entries, n, scheme, max_workspace_entries))
+function _check_classical_workspace(shape, scheme, max_workspace_entries)
+    entries = _matrix_entries(shape)
+    _has_addressable_matrices(entries) || throw(_execution_failure(:matrix_size, shape, scheme))
+    if sum(entries) > max_workspace_entries
+        throw(_execution_failure(:workspace_entries, shape, scheme, max_workspace_entries))
+    end
+    return nothing
+end
+
+function _check_zero_workspace(shape, scheme, max_workspace_entries)
+    m, _, n = shape
+    output_entries = big(m) * n
+    if max(m, n) == typemax(Int) || !_has_addressable_matrices((output_entries,))
+        throw(_execution_failure(:matrix_size, shape, scheme))
+    end
+    if output_entries > max_workspace_entries
+        throw(_execution_failure(:workspace_entries, shape, scheme, max_workspace_entries))
     end
     return nothing
 end

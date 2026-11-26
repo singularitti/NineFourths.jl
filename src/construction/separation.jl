@@ -7,6 +7,13 @@ function evaluation_parameter(t::Union{Integer,Rational})
     return Rational{BigInt}(t)
 end
 
+function evaluation_parameter(t::PhaseSum)
+    length(t.terms) == 1 ||
+        throw(DomainError(t, "Laurent substitutions require an invertible phase monomial"))
+    evaluation_parameter(only(values(t.terms)))
+    return t
+end
+
 """
     midpoint_column(emit, a, b, s, leg, copy, index, t)
 
@@ -146,21 +153,34 @@ function separation_character(leg, i, k, ρ)
     end
 end
 
+function _admissible_separation_order(M, admissible_order)
+    isnothing(admissible_order) && return 2M
+    admissible_order isa Integer && 2M - 1 <= admissible_order <= 2M ||
+        throw(ArgumentError("the Fourier order must equal 2M or 2M−1"))
+    return big(admissible_order)
+end
+
 """
-    separation_column(emit, sector_type, leg, ρ, coordinates, t, rootpower)
+    separation_column(emit, sector_type, leg, ρ, coordinates, t,
+                      [rootpower]; admissible_order=nothing)
 
 Substitute one variable of `I_(2M) ⊗ (∑ᵢ Tᵢ)^⊗N` using Lemmas 5.1 and 5.5,
-where `M = sector_type.multiplicity`. The copy number `ρ` lies in
-`0:2M-1` and `rootpower(e)` returns the `e`th power of a primitive
-`2M`th root of unity. Each image coordinate is
+where `M = sector_type.multiplicity`. Use Fourier order `L = 2M` by default
+or choose `L = 2M-1` as in §7. Copies are numbered from zero through `2M-1`.
+The first `L` copies are active.
+If supplied, `rootpower(e)` returns the `e`th power of a primitive
+`L`th root of unity. Each image coordinate is
 `(type_rank, dot_index, canonical_indices)`. The shared first leg uses
 `dot_index == 1`. The second and third legs take a source coordinate
 `(sector, index)` per tensor factor and drop words outside the fixed type.
 """
 function separation_column(emit, sector_type::SectorType, leg, ρ, coordinates, t,
-                           rootpower)
+                           rootpower=nothing; admissible_order=nothing)
     t = evaluation_parameter(t)
     M = sector_type.multiplicity
+    L = _admissible_separation_order(M, admissible_order)
+    ρ >= L && return nothing
+    rootpower = isnothing(rootpower) ? exponent -> root_of_unity(L, exponent) : rootpower
     if leg == 1
         for j in 0:(M - 1)
             word = type_word(sector_type, j + 1)
@@ -177,7 +197,7 @@ function separation_column(emit, sector_type::SectorType, leg, ρ, coordinates, 
         for k in 0:(M - 1)
             phase, weight = separation_character(leg, i, k, ρ)
             scale = t^weight
-            leg == 3 && (scale /= 2M)
+            leg == 3 && (scale /= L)
             emit((rank, k + 1, ordered), rootpower(phase) * scale)
         end
     end

@@ -107,7 +107,7 @@ end
 # In Q(1,2), the two nonscalar legs of each orientation carry the same
 # binary index. Grouping these digits by the scalar leg gives the two
 # matrix indices on each source leg, even across powered copies of Q.
-function midpoint_test_source_pairs(witness, leg, row)
+function midpoint_test_source_pairs(witness, leg, row; embed=identity, zero_weight=big(0) // 1)
     orientations = ((1, 2, 3), (3, 1, 2), (2, 3, 1), (2, 1, 3), (3, 2, 1), (1, 3, 2))
     active = filter(orientation -> orientation[leg] != 1, orientations)
     shared_legs = ((2, 3), (3, 1), (2, 1))[leg]
@@ -124,12 +124,48 @@ function midpoint_test_source_pairs(witness, leg, row)
         end
         return index
     end
-    weights = Dict{Tuple{BigInt,BigInt},Rational{BigInt}}()
+    weights = Dict{Tuple{BigInt,BigInt},typeof(zero_weight)}()
     for (column, weight) in NineFourths.row_entries(witness.restriction.legs[leg], row)
         coordinates = map(digits -> axis_index(column - 1, digits), positions)
-        weights[coordinates] = get(weights, coordinates, 0 // 1) + weight
+        weights[coordinates] = get(weights, coordinates, zero_weight) + embed(weight)
     end
     return weights
+end
+
+function test_midpoint_tensor_identity(witness; embed=identity, zero_weight=big(0) // 1)
+    Weight = typeof(zero_weight)
+    rows = ntuple(3) do leg
+        [midpoint_test_source_pairs(witness, leg, row; embed, zero_weight) for row in 1:4]
+    end
+    right_buckets = map(rows[2]) do right
+        by_inner = Dict{BigInt,Vector{Tuple{BigInt,Weight}}}()
+        for ((inner, column), weight) in right
+            push!(get!(() -> Tuple{BigInt,Weight}[], by_inner, inner), (column, weight))
+        end
+        return by_inner
+    end
+
+    matrix_units = CartesianIndices((2, 2))
+    for y in 1:4, x in 1:4
+        by_inner = right_buckets[y]
+        product = Dict{Tuple{BigInt,BigInt},Weight}()
+        for ((row, inner), weight) in rows[1][x]
+            haskey(by_inner, inner) || continue
+            for (column, right_weight) in by_inner[inner]
+                coordinate = (row, column)
+                product[coordinate] = get(product, coordinate, zero_weight) + weight * right_weight
+            end
+        end
+        i, left_inner = Tuple(matrix_units[x])
+        right_inner, j = Tuple(matrix_units[y])
+        for z in 1:4
+            coefficient = sum(rows[3][z]; init=zero_weight) do (coordinate, weight)
+                return get(product, coordinate, zero_weight) * weight
+            end
+            expected = left_inner == right_inner && Tuple(matrix_units[z]) == (i, j)
+            @test coefficient == embed(Int(expected))
+        end
+    end
 end
 
 @testset "Compiled midpoint tensor identity" begin
@@ -140,36 +176,5 @@ end
     # to M₂ ⊗ M₄ before discarding the returned catalyst.
     witness = NineFourths.compile_witness(nodes, 1)
     @test witness.side == 2
-    rows = ntuple(3) do leg
-        [midpoint_test_source_pairs(witness, leg, row) for row in 1:4]
-    end
-    right_buckets = map(rows[2]) do right
-        by_inner = Dict{BigInt,Vector{Tuple{BigInt,Rational{BigInt}}}}()
-        for ((inner, column), weight) in right
-            push!(get!(() -> Tuple{BigInt,Rational{BigInt}}[], by_inner, inner), (column, weight))
-        end
-        return by_inner
-    end
-
-    matrix_units = CartesianIndices((2, 2))
-    for y in 1:4, x in 1:4
-        by_inner = right_buckets[y]
-        product = Dict{Tuple{BigInt,BigInt},Rational{BigInt}}()
-        for ((row, inner), weight) in rows[1][x]
-            haskey(by_inner, inner) || continue
-            for (column, right_weight) in by_inner[inner]
-                coordinate = (row, column)
-                product[coordinate] = get(product, coordinate, 0 // 1) + weight * right_weight
-            end
-        end
-        i, left_inner = Tuple(matrix_units[x])
-        right_inner, j = Tuple(matrix_units[y])
-        for z in 1:4
-            coefficient = sum(rows[3][z]; init=big(0) // 1) do (coordinate, weight)
-                return get(product, coordinate, 0 // 1) * weight
-            end
-            expected = left_inner == right_inner && Tuple(matrix_units[z]) == (i, j)
-            @test coefficient == Int(expected)
-        end
-    end
+    test_midpoint_tensor_identity(witness)
 end

@@ -19,6 +19,17 @@ function explicit_scheme(U::AbstractMatrix, V::AbstractMatrix, W::AbstractMatrix
     return ExplicitScheme(u, U, V, W)
 end
 
+"""
+    BilinearScheme(U, V, W)
+
+Create a scheme from three coefficient tables with `u²` rows and one column
+per product. Each column describes a left linear form, a right linear form
+and the weights of the product in the output. Coefficients may be elements
+of the same field as the input matrices.
+"""
+BilinearScheme(U::AbstractMatrix, V::AbstractMatrix, W::AbstractMatrix) =
+    explicit_scheme(U, V, W)
+
 struct PaperProgram{Ops<:Tuple}
     steps::BigInt
     log_length::BigInt
@@ -122,7 +133,7 @@ _materialize_length(x::ScaledPowerOfTwo) = x.coefficient * big(2)^x.exponent
 
 function scheme_coefficient(s::ExplicitScheme, term::Integer, leg::Integer, coordinate::Integer)
     table = (s.U, s.V, s.W)[leg]
-    return to_exact(table[coordinate, term])
+    return table[coordinate, term]
 end
 
 struct LoweredScheme <: BilinearScheme
@@ -153,11 +164,12 @@ function scheme_coefficient(s::LoweredScheme, term::Integer, leg::Integer, coord
     return total
 end
 
-function lower_scheme(s::PaperScheme)
+function lower_scheme(s::PaperScheme; admissible_order=nothing)
     build, compile, decompose = s.program.operations
-    witness = compile(build(s.derivation), s.program.power; step_bound=s.program.steps)
+    witness = compile(build(s.derivation), s.program.power; step_bound=s.program.steps,
+                      admissible_order)
     a = _materialize_length(s.derivation.parameters.a)
-    return LoweredScheme(decompose(a, a, witness.copies), witness)
+    return LoweredScheme(decompose(a, a, witness.copies; admissible_order), witness)
 end
 
 struct PaperCoefficient{S<:PaperScheme}

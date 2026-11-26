@@ -33,19 +33,80 @@ end
 
 """
     verify_scheme(scheme::BilinearScheme) -> VerificationReport
+    verify_scheme(scheme::ExplicitScheme; field=nothing) -> VerificationReport
 
 Verify the matrix multiplication identity and derive the exponent bound.
 Explicit and lowered schemes are checked on every pair of matrix units in
-exact arithmetic.
+exact arithmetic. For explicit tables, `field` supplies the common exact
+field when it cannot be inferred from the coefficients.
 For the paper form, the identity evidence is theorem-level verification of the
 executable derivation and restriction recipe, with symbolic copy, degree, and
 rank bounds from §6 of the paper. This certificate depends on the algebraic
 primitives used by the compiler and the seed builder.
 """
-verify_scheme(scheme::ExplicitScheme) =
-    _verify_coefficient_tables(scheme.u, scheme.U, scheme.V, scheme.W)
+verify_scheme(scheme::ExplicitScheme; field=nothing) =
+    _verify_coefficient_tables(scheme.u, scheme.U, scheme.V, scheme.W; field)
 
-function _verify_coefficient_tables(u, U, V, W)
+_verification_rational_or_algebraic(value) = value isa Union{
+    _BuiltinExact,PhaseSum,Nemo.QQBarFieldElem,Nemo.QQFieldElem,Nemo.ZZRingElem
+}
+
+function _unsupported_verification_scalar(value)
+    value isa Union{AbstractFloat,AbstractArray,Nemo.MatElem,Nemo.MatRingElem} && return true
+    value isa Complex && return !(value isa Complex{<:_BuiltinExact})
+    return value isa Nemo.RingElem && !Nemo.is_exact_type(typeof(value))
+end
+
+_widen_verification_scalar(value) = to_exact(value)
+_widen_verification_scalar(value::Nemo.ZZRingElem) = to_exact(BigInt(value))
+
+function _native_verification_scalar(options, value)
+    if value isa Union{PhaseSum,Nemo.QQBarFieldElem}
+        if options.one isa Nemo.QQBarFieldElem
+            return value isa PhaseSum ? as_qqbar(value) : value
+        elseif options.one isa Complex
+            algebraic = value isa PhaseSum ? as_qqbar(value) : value
+            return complex(rational_result(real(algebraic)), rational_result(imag(algebraic)))
+        end
+        value = rational_result(value)
+    end
+    return _field_embed_native(options, value)
+end
+
+function _verification_coefficients(tables, field)
+    if isnothing(field) && all(T -> all(_verification_rational_or_algebraic, T), tables)
+        zero_value = zero(Rational{BigInt})
+        return map(T -> map(_widen_verification_scalar, T), tables), zero_value, one(zero_value)
+    end
+
+    # Rational coefficients can embed in the field of the native entries.
+    # Inspect each table before converting so a mixed parent is identified.
+    domain, scalar_type, sample = nothing, Union{}, nothing
+    fractional_entries = false
+    for table in tables, value in table
+        value isa _BuiltinRational && (fractional_entries |= denominator(value) != 1)
+        _verification_rational_or_algebraic(value) && continue
+        domain = _common_field(domain, _scalar_field(value))
+        scalar_type = promote_type(scalar_type, typeof(value))
+        typeof(value) === scalar_type && (sample = value)
+    end
+    metadata = (; domain, scalar_type, sample, fractional_entries,
+                rational_entries=false, exact_entries=false)
+    options = _field_configuration(metadata, field)
+    if options.one isa Complex{<:_BuiltinExact} && !(options.one isa Complex{Rational{BigInt}})
+        options = _field_configuration(metadata, Complex{Rational{BigInt}})
+    end
+    zero_value, one_value = options.zero, options.one
+    if isnothing(zero_value) || isnothing(one_value) || zero_value == one_value ||
+       _unsupported_verification_scalar(one_value) ||
+       (one_value isa _BuiltinExact && !(one_value isa Union{BigInt,Rational{BigInt}}))
+        throw(CoefficientIncompatible("The explicit maps require identities in a supported exact field."))
+    end
+    converted = map(T -> map(value -> _native_verification_scalar(options, value), T), tables)
+    return converted, zero_value, one_value
+end
+
+function _verify_coefficient_tables(u, U, V, W; field=nothing)
     dimensions = size(U)
     entries, rank = dimensions
     if u < 1 || big(u)^2 != entries || rank < 1 ||
@@ -55,30 +116,44 @@ function _verify_coefficient_tables(u, U, V, W)
         )
     end
 
-    U, V, W = try
-        map(to_exact, U), map(to_exact, V), map(to_exact, W)
-    catch err
-        err isa MethodError && err.f === to_exact || rethrow()
-        return _verification_failure(
-            "The explicit maps contain a coefficient outside the supported exact field.",
-        )
-    end
-    if any(map -> any(value -> value isa Rational && !isfinite(value), map), (U, V, W))
+    tables = (U, V, W)
+    if any(T -> any(value -> value isa _BuiltinRational && !isfinite(value), T), tables)
         return _verification_failure("The explicit maps must have finite coefficients.")
     end
+    if any(T -> any(_unsupported_verification_scalar, T), tables)
+        return _verification_failure("The explicit maps require coefficients in a supported exact field.")
+    end
+
+    try
+        coefficients, zero_value, one_value = _verification_coefficients(tables, field)
+        return _check_matrix_unit_coefficients(u, coefficients, zero_value, one_value)
+    catch err
+        if err isa ArgumentError
+            return _verification_failure("The explicit map coefficients do not share a compatible field parent.")
+        elseif err isa CoefficientIncompatible
+            return _verification_failure(err.message)
+        elseif err isa Union{MethodError,InexactError,DomainError,DivideError,TypeError}
+            return _verification_failure("The explicit map coefficients cannot be combined in a common exact field.")
+        end
+        rethrow()
+    end
+end
+
+function _check_matrix_unit_coefficients(u, (U, V, W), zero_value, one_value)
+    entries, rank = size(U)
     coordinates = CartesianIndices((Int(u), Int(u)))
     for x in 1:entries, y in 1:entries
         i, left_inner = Tuple(coordinates[x])
         right_inner, j = Tuple(coordinates[y])
         products = [(term, U[x, term] * V[y, term]) for term in 1:rank if
-                    !iszero(U[x, term]) && !iszero(V[y, term])]
+                    U[x, term] != zero_value && V[y, term] != zero_value]
         for z in 1:entries
-            coefficient = zero(Rational{BigInt})
+            coefficient = zero_value
             for (term, factor) in products
                 coefficient += W[z, term] * factor
             end
             expected = left_inner == right_inner && Tuple(coordinates[z]) == (i, j)
-            coefficient == Int(expected) && continue
+            coefficient == (expected ? one_value : zero_value) && continue
             coordinate = Tuple(coordinates[z])
             return _verification_failure(
                 "The coefficient at output $coordinate for input matrix units " *
@@ -179,7 +254,7 @@ function verify_scheme(scheme::PaperScheme)
     end
 
     # Claim 6.6 bounds each stage degree by 6·9^N. After powering, each
-    # of at most 2S stages uses at most 6N·9^N+1 ≤ 7N·9^N ≤ 63^N ≤ 2^(6N)
+    # of at most 2S stages uses at most 6N·9^N+2 ≤ 7N·9^N ≤ 63^N ≤ 2^(6N)
     # interpolation points. Each repeated restriction therefore needs 12SN
     # copies to interpolate and 6SN to supply the I_64 factors. Separately,
     # Lemma 6.7 bounds the rank of the powered catalyst by 2^(16SN²).
@@ -200,8 +275,9 @@ function verify_scheme(scheme::PaperScheme)
     end
 
     # The q doublings give B ≥ (q/2)·2^(4q/3). With the bounded loss,
-    # log2(n)/(2m) ≥ 4q/3 + log2(q) - 2. The rank of Q(A,A)^⊗m is at
-    # most (2A-1)^(6m), with log2(2A-1) < q + log2(q) + 1.
+    # log2(n)/(2m) ≥ 4q/3 + log2(q) - 2. The seed uses Fourier order
+    # 2A-1 or 2A depending on the characteristic. In both cases its
+    # log2 rank is bounded by 6m log2(2A) = 6m (q + log2(q) + 1).
     exponent = 9 * (q + ceil_log_q + 1) // (4q + 3 * (floor_log_q - 2))
     if exponent > target
         return VerificationReport(false, :symbolic_restriction, exponent, target,

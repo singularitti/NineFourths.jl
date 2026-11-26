@@ -70,7 +70,7 @@
         @test NineFourths.multiply(A, B, paper; fallback=:classical) == expected
 
         empty = Matrix{Rational{Int}}(undef, 0, 0)
-        @test_throws NineFourths.ExecutionInfeasible NineFourths.multiply(empty, empty, strassen)
+        @test NineFourths.multiply(empty, empty, strassen) == empty
         C = NineFourths.multiply(empty, empty, strassen; fallback=:classical)
         @test size(C) == (0, 0)
         @test C isa Matrix{Rational{BigInt}}
@@ -79,8 +79,8 @@
                                                             fallback=:classical)
         @test_throws DimensionMismatch NineFourths.multiply(A[:, 1:2], B[:, 1:2], strassen;
                                                             fallback=:classical)
-        @test_throws ArgumentError NineFourths.multiply(Float64.(A), B, strassen;
-                                                         fallback=:classical, max_coefficient_visits=0)
+        @test NineFourths.multiply(Float64.(A), B, strassen;
+                                   fallback=:classical, max_coefficient_visits=0) == Float64.(expected)
         @test_throws DomainError NineFourths.multiply([1//0;;], [1;;], strassen;
                                                       fallback=:classical, max_coefficient_visits=0)
         @test_throws ArgumentError NineFourths.multiply(A, B, strassen; fallback=:unknown)

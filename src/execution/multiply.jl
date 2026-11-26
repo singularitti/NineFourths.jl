@@ -1,151 +1,162 @@
-function _contains_rationals(matrix)
-    T = eltype(matrix)
-    T <: Integer && return false
-    if typeintersect(T, Union{Integer,Rational}) === Union{}
-        throw(ArgumentError("matrix entries must be integers or rationals"))
-    end
-    rational = T <: Rational
-    for value in matrix
-        if value isa Rational
-            iszero(denominator(value)) && throw(DomainError(value, "matrix entries must be finite"))
-            rational = true
-        elseif !(value isa Integer)
-            throw(ArgumentError("matrix entries must be integers or rationals"))
-        end
-    end
-    return rational
+function _zero_matrix(::Type{T}, m, n, zero_value) where {T}
+    C = Matrix{T}(undef, m, n)
+    isempty(C) && return C
+    isnothing(zero_value) && throw(ArgumentError("the output needs a zero in the input field"))
+    return fill!(C, zero_value)
 end
 
-function _execution_zeros(n)
-    return fill!(Matrix{ExactScalar}(undef, n, n), zero(Rational{BigInt}))
-end
-
-function _classical_leaf(A, B)
-    C = _execution_zeros(size(A, 1))
+function _classical_product(A, B, zero_value, T, add=+, product=*)
+    C = _zero_matrix(T, size(A, 1), size(B, 2), zero_value)
     for column in axes(B, 2), k in axes(A, 2)
         b = B[k, column]
-        iszero(b) && continue
         for row in axes(A, 1)
-            C[row, column] += A[row, k] * b
+            C[row, column] = add(C[row, column], product(A[row, k], b))
         end
     end
     return C
 end
 
-function _accumulate_forms!(left, right, A, B, scheme, term, side, active_side)
-    child_size = size(left, 1)
-    n = size(A, 1)
-    for block_column in 1:active_side, block_row in 1:active_side
+function _accumulate_form!(form, source, scheme, domain, term, leg, side,
+                           active_rows, active_columns)
+    child_rows, child_columns = size(form)
+    rows, columns = size(source)
+    for block_column in 1:active_columns, block_row in 1:active_rows
         coordinate = block_row + (block_column - 1) * side
-        u = scheme_coefficient(scheme, term, 1, coordinate)
-        v = scheme_coefficient(scheme, term, 2, coordinate)
-        use_u = !iszero(u)
-        use_v = !iszero(v)
-        use_u || use_v || continue
-        row_offset = (block_row - 1) * child_size
-        column_offset = (block_column - 1) * child_size
-        for column in 1:min(child_size, n - column_offset), row in 1:min(child_size, n - row_offset)
-            i = row_offset + row
-            j = column_offset + column
-            if use_u
-                left[row, column] += u * A[i, j]
-            end
-            if use_v
-                right[row, column] += v * B[i, j]
-            end
+        coefficient = _field_coefficient(domain, scheme, term, leg, coordinate)
+        _field_iszero(coefficient, domain.zero) && continue
+        row_offset = (block_row - 1) * child_rows
+        column_offset = (block_column - 1) * child_columns
+        rows_in_block = min(child_rows, rows - row_offset)
+        columns_in_block = min(child_columns, columns - column_offset)
+        for column in 1:columns_in_block, row in 1:rows_in_block
+            value = _field_apply(coefficient, source[row_offset + row, column_offset + column])
+            form[row, column] = _field_add(form[row, column], value)
         end
     end
     return nothing
 end
 
-function _accumulate_product!(C, product, scheme, term, side, active_side)
-    child_size = size(product, 1)
-    n = size(C, 1)
-    for block_column in 1:active_side, block_row in 1:active_side
+function _accumulate_product!(C, product, scheme, domain, term, side, active_rows, active_columns)
+    child_rows, child_columns = size(product)
+    rows, columns = size(C)
+    for block_column in 1:active_columns, block_row in 1:active_rows
         coordinate = block_row + (block_column - 1) * side
-        w = scheme_coefficient(scheme, term, 3, coordinate)
-        iszero(w) && continue
-        row_offset = (block_row - 1) * child_size
-        column_offset = (block_column - 1) * child_size
-        for column in 1:min(child_size, n - column_offset), row in 1:min(child_size, n - row_offset)
-            C[row_offset + row, column_offset + column] += w * product[row, column]
+        coefficient = _field_coefficient(domain, scheme, term, 3, coordinate)
+        _field_iszero(coefficient, domain.zero) && continue
+        row_offset = (block_row - 1) * child_rows
+        column_offset = (block_column - 1) * child_columns
+        rows_in_block = min(child_rows, rows - row_offset)
+        columns_in_block = min(child_columns, columns - column_offset)
+        for column in 1:columns_in_block, row in 1:rows_in_block
+            i, j = row_offset + row, column_offset + column
+            value = _field_apply(coefficient, product[row, column])
+            C[i, j] = _field_add(C[i, j], value)
         end
     end
     return nothing
 end
 
-function _scheme_product(A, B, scheme, side, rank)
-    n = size(A, 1)
-    child_size = cld(n, side)
-    active_side = cld(n, child_size)
-    C = _execution_zeros(n)
-    left = _execution_zeros(child_size)
-    right = _execution_zeros(child_size)
+function _scheme_product(A, B, scheme, domain, zero_value, side, rank)
+    m, k = size(A)
+    n = size(B, 2)
+    shape = (m, k, n)
+    child = _child_shape(shape, side)
+    child_m, child_k, child_n = child
+    active_m, active_k, active_n = _active_blocks(shape, child)
+    C = _zero_matrix(Any, m, n, zero_value)
+    left = Matrix{Any}(undef, child_m, child_k)
+    right = Matrix{Any}(undef, child_k, child_n)
+    recurse = _apply_child_layer(side, child)
     for term in 1:rank
-        fill!(left, zero(Rational{BigInt}))
-        fill!(right, zero(Rational{BigInt}))
-        _accumulate_forms!(left, right, A, B, scheme, term, side, active_side)
-        product = if _apply_child_layer(side, child_size)
-            _scheme_product(left, right, scheme, side, rank)
+        fill!(left, zero_value)
+        fill!(right, zero_value)
+        _accumulate_form!(left, A, scheme, domain, term, 1, side, active_m, active_k)
+        _accumulate_form!(right, B, scheme, domain, term, 2, side, active_k, active_n)
+        product = if recurse
+            _scheme_product(left, right, scheme, domain, zero_value, side, rank)
         else
-            _classical_leaf(left, right)
+            _classical_product(left, right, zero_value, Any, _field_add, _field_mul)
         end
-        _accumulate_product!(C, product, scheme, term, side, active_side)
+        _accumulate_product!(C, product, scheme, domain, term, side, active_m, active_n)
     end
     return C
+end
+
+_wide_product(a, b) = big(a) * b
+
+function _classical_fallback(inputs)
+    product = inputs.legacy ? _wide_product : (*)
+    return _classical_product(inputs.left, inputs.right, inputs.zero, inputs.eltype, +, product)
 end
 
 """
-    multiply(A, B, scheme::BilinearScheme; fallback=:error,
+    multiply(A, B, scheme::BilinearScheme; fallback=:error, field=nothing,
              max_coefficient_visits=10_000_000, max_workspace_entries=10_000_000)
 
-Multiply same-size square matrices of exact integers or finite rationals with
-one-based indexing. The result is a dense `Matrix{BigInt}` for integer inputs
-and a dense `Matrix{Rational{BigInt}}` if either input is rational.
+Multiply an `m×k` matrix by a `k×n` matrix and return a dense Julia matrix.
+With an inferred domain, Julia integer inputs produce `Matrix{BigInt}` and
+Julia rational inputs produce `Matrix{Rational{BigInt}}`. Other inputs use
+their common scalar field. Pass `field` to supply a parent, scalar type, or
+representative element when needed.
 
-The default requires at least one application of the bilinear rule. The
-product uses implicit zero padding and applies further layers where a child
-block can be split again. It uses conventional multiplication at the leaves.
-If a layer is infeasible, including for empty inputs, `fallback=:classical`
-allows an entirely conventional product. Input and arithmetic errors propagate.
+For positive dimensions the default requires at least one bilinear scheme
+layer. The product uses implicit zero padding along each axis and conventional
+multiplication at the leaves. `fallback=:classical` permits a conventional
+product when the requested scheme cannot execute in the input field or budgets.
+A zero dimension determines an empty or zero result directly.
 
-The coefficient-visit limit bounds the sum of visits to the three legs across
-all scheme layers. The workspace limit bounds dense scalar slots, including
-promoted inputs and the result. These limits are checked before allocating
-the multiplication workspace. The workspace limit also applies to fallback.
+The visit budget bounds the coefficient visits across the recursive product.
+The workspace budget bounds live dense matrix entries, including normalized
+inputs and the result. The workspace budget also applies to classical fallback.
 """
-function multiply(A::AbstractMatrix, B::AbstractMatrix, scheme::BilinearScheme;
-                  fallback=:error, max_coefficient_visits::Integer=DEFAULT_COEFFICIENT_VISITS,
+function multiply(A::FieldMatrix, B::FieldMatrix, scheme::BilinearScheme;
+                  fallback=:error, field=nothing,
+                  max_coefficient_visits::Integer=DEFAULT_COEFFICIENT_VISITS,
                   max_workspace_entries::Integer=DEFAULT_WORKSPACE_ENTRIES)
     fallback === :error || fallback === :classical ||
         throw(ArgumentError("fallback must be :error or :classical"))
     max_coefficient_visits >= 0 || throw(ArgumentError("max_coefficient_visits must be nonnegative"))
     max_workspace_entries >= 0 || throw(ArgumentError("max_workspace_entries must be nonnegative"))
-    Base.require_one_based_indexing(A, B)
-    size(A, 1) == size(A, 2) && size(A) == size(B) ||
-        throw(DimensionMismatch("inputs must be square matrices of the same size"))
-    n = size(A, 1)
-    plan = _execution_plan(n, scheme, max_coefficient_visits, max_workspace_entries)
-    use_classical = plan isa ExecutionInfeasible
-    if use_classical
+    m, k = size(A)
+    right_rows, n = size(B)
+    k == right_rows || throw(DimensionMismatch("input inner dimensions must match"))
+    shape = (m, k, n)
+
+    if any(iszero, shape)
+        _check_zero_workspace(shape, scheme, max_workspace_entries)
+        inputs = _field_inputs(A, B; field)
+        return _zero_matrix(inputs.eltype, m, n, inputs.zero)
+    end
+
+    plan = _execution_plan(shape, scheme, max_coefficient_visits, max_workspace_entries;
+                           dimensions_for=_minimum_dimensions)
+    if plan isa ExecutionInfeasible
         fallback === :classical || throw(plan)
-        _check_classical_workspace(n, scheme, max_workspace_entries)
+        _check_classical_workspace(shape, scheme, max_workspace_entries)
+        inputs = _field_inputs(A, B; field)
+        return _classical_fallback(inputs)
     end
 
-    rational_left = _contains_rationals(A)
-    rational_right = _contains_rationals(B)
-    T = rational_left || rational_right ? Rational{BigInt} : BigInt
-    if use_classical
-        return Matrix{T}(A) * Matrix{T}(B)
-    end
+    inputs = _field_inputs(A, B; field)
+    try
+        arithmetic = _scheme_arithmetic(scheme, inputs)
+        adapted, domain = arithmetic.scheme, arithmetic.domain
+        adapted_plan = adapted === scheme && !(scheme isa LoweredScheme) ? plan :
+            _execution_plan(shape, adapted, max_coefficient_visits, max_workspace_entries)
+        if adapted_plan isa ExecutionInfeasible
+            fallback === :classical || throw(adapted_plan)
+            return _classical_fallback(inputs)
+        end
 
-    active_scheme = scheme isa PaperScheme ? lower_scheme(scheme) : scheme
-    left = Matrix{Rational{BigInt}}(A)
-    right = Matrix{Rational{BigInt}}(B)
-    result = _scheme_product(left, right, active_scheme, plan.side, plan.rank)
-    C = Matrix{T}(undef, n, n)
-    for index in eachindex(C, result)
-        C[index] = rational_result(result[index])
+        result = _scheme_product(inputs.left, inputs.right, adapted, domain, inputs.zero,
+                                 adapted_plan.side, adapted_plan.rank)
+        C = Matrix{inputs.eltype}(undef, m, n)
+        for index in eachindex(C, result)
+            C[index] = _field_result(domain, result[index])
+        end
+        return C
+    catch error
+        fallback === :classical && error isa CoefficientIncompatible || rethrow()
+        return _classical_fallback(inputs)
     end
-    return C
 end

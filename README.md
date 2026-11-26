@@ -6,9 +6,10 @@
 |   **Coverage**    | [![Coverage](https://github.com/singularitti/NineFourths.jl/badges/main/coverage.svg)](https://github.com/singularitti/NineFourths.jl/commits/main) [![Coverage](https://codecov.io/gh/singularitti/NineFourths.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/singularitti/NineFourths.jl)                                                                                                                                                                                                                |
 |    **Others**     | [![Code Style: Blue](https://img.shields.io/badge/code%20style-blue-4495d1.svg)](https://github.com/invenia/BlueStyle) [![License](https://img.shields.io/github/license/singularitti/NineFourths.jl)](https://github.com/singularitti/NineFourths.jl/blob/main/LICENSE)                                                                                                                                                                                                                                                   |
 
-NineFourths constructs exact bilinear schemes for square matrix multiplication
-from OpenAI's upper bound and Shpilka's explicit construction. It accepts integer
-and rational matrices and uses exact arithmetic throughout.
+NineFourths constructs bilinear schemes from OpenAI's upper bound for square
+matrix multiplication and Shpilka's explicit construction. Its executor
+multiplies compatible rectangular matrices over a common scalar field,
+including finite fields and user-defined fields.
 
 This repository is created and maintained by
 [@singularitti](https://github.com/singularitti), and contributions are highly welcome.
@@ -39,26 +40,48 @@ this construction.
 A scheme specifies three coefficient maps for a block of side `u`. For each
 term it forms one linear combination of the left blocks and one of the right
 blocks, multiplies them, then weights that product into each output block.
-Coordinates are one-based and follow Julia's column-major order. The paper
-scheme stores the finite operations that generate these coefficients. Indexing
-it returns a deferred coefficient.
+Scheme coordinates are one-based and follow Julia's column-major order.
+To use coefficient tables of your own, pass them to `BilinearScheme(U, V, W)`.
+The paper scheme stores the finite operations that generate its coefficients.
+Indexing it returns a deferred coefficient.
 
 ```julia
-A = [1 2; 3 4]
-B = [1//2 0; 0 1//3]
-# Request a paper layer. For the default scheme this raises ExecutionInfeasible.
-# multiply(A, B, scheme)
+import Nemo
+F = Nemo.GF(5)
+A = F.([1 2 3; 4 0 1])
+B = reshape(F.([1, 2, 3]), 3, 1)
 
 C = multiply(A, B, scheme; fallback=:classical)
-# 2×2 Matrix{Rational{BigInt}} with rows [1//2, 2//3] and [3//2, 4//3]
+@assert C == reshape(F.([4, 2]), 2, 1)
 ```
 
-`multiply(A, B, scheme)` requires at least one scheme layer. When it cannot run
-one, the exception gives the failed resource check. With `fallback=:classical`
-the caller permits an ordinary exact matrix product. Integer-only inputs produce
-`Matrix{BigInt}`; rational inputs produce `Matrix{Rational{BigInt}}`. Inputs
-must be same-size, one-based square matrices. On executable schemes, recursive
-layers use implicit zero padding and ordinary exact multiplication at the leaves.
+`multiply(A, B, scheme)` accepts `m×k` and `k×n` inputs and returns a dense
+Julia `m×n` matrix. For positive dimensions it requires at least one scheme
+layer. Each recursion level pads the three dimensions independently and uses
+ordinary multiplication at the leaves. If the requested layer exceeds a
+resource limit or an explicit rule has an undefined coefficient in the input
+field, the default raises an exception. `fallback=:classical` permits an
+ordinary product in the same field. In the example, the default paper scheme
+exceeds the index limit, so this explicit fallback computes the result.
+
+The executor accepts Julia `AbstractMatrix` containers and Nemo matrices.
+The two inputs must share a field or admit a common scalar representation.
+Native field elements retain their arithmetic and parent. Supported examples
+include Nemo prime fields, finite extensions, algebraic number fields and
+custom scalar types outside `Number`.
+A custom field supplies addition, subtraction, multiplication, equality,
+additive and multiplicative identities, and inversion or division for
+fractional coefficients. When one scalar type represents several fields,
+`parent(x)` lets the executor check that the elements share a parent.
+Built-in Julia integers and rationals retain exact
+arithmetic with `BigInt` and `Rational{BigInt}` results. Floating-point
+inputs use their native rounding.
+
+When any dimension is zero, the shape determines the empty or zero product.
+A nonempty `m×0` by `0×n` result needs the field's additive identity. If the
+arrays carry the element type alone and that type has multiple possible
+parents, use `multiply(A, B, scheme; field=F)`. A callable parent, scalar
+type with identities, or representative field element can supply the domain.
 
 ## Construction and verification
 
@@ -68,14 +91,18 @@ on this machine. Its verification checks the construction choices, degree and
 rank budgets, and the exponent inequality. It relies on the paper's lemmas and
 the implementation of the corresponding tensor maps.
 
-For an expanded scheme, `verify_scheme` checks the matrix multiplication identity
-on all input matrix units. The test suite also runs the paper's executable
-baseline $Q(1,2)$ through the compiler and `multiply`. It exhaustively checks
+For explicit tables, `verify_scheme` checks the matrix multiplication identity
+on all input matrix units in their common exact field. A callable field parent
+can also be supplied as `verify_scheme(scheme; field=F)`. The test suite runs
+the paper's executable baseline $Q(1,2)$ through the compiler and `multiply`. It exhaustively checks
 the 64-term rule for a block of side four and compares an exact product with
 Julia's matrix multiplication. A separate check contracts all 64 tensor entries
 of a size-two midpoint construction, including preparation and return of its
-auxiliary matrix tensor. Run the suite with `import Pkg; Pkg.test()` from the
-active project.
+auxiliary matrix tensor. Finite-field execution selects Fourier orders
+invertible in the input field, performs interpolation with roots of unity, and
+projects temporary cyclotomic expressions back into that field. The suite
+also checks rectangular paper products in small characteristics against
+independent products. Run it with `import Pkg; Pkg.test()` from the active project.
 
 | Source | Responsibility |
 | --- | --- |
@@ -84,11 +111,12 @@ active project.
 | `src/construction/polynomial.jl`, `separation.jl`, `sectors.jl` | Polynomial seed, Fourier separation, midpoint and tripling maps |
 | `src/construction/compile.jl` | Interpolation, auxiliary tensor preparation and reuse, and final restriction |
 | `src/schemes.jl`, `src/verification.jl` | Scheme construction, coefficient access and verification reports |
-| `src/execution/` | Resource checks and exact block-recursive multiplication |
+| `src/execution/` | Field arithmetic and specialization, resource checks, rectangular block recursion |
 
 The algorithm follows the polynomial construction in §3, the separation and
 degeneration maps in §§4–5, and the finite witness and exponent in §6 and
-Theorem 1.2 of Shpilka's exposition. [Amir Shpilka, *Exposition of OpenAI’s Matrix Multiplication in Exponent 9/4 (and an explicit algorithm)* (2026)](https://eccc.weizmann.ac.il/report/2026/281/).
+Theorem 1.2 of Shpilka's exposition. Section 7 gives the field-dependent
+separation and descent argument. [Amir Shpilka, *Exposition of OpenAI’s Matrix Multiplication in Exponent 9/4 (and an explicit algorithm)* (2026)](https://eccc.weizmann.ac.il/report/2026/281/).
 The original upper-bound proof gives the underlying tensor restrictions and
 their conversion to matrix multiplication algorithms. [OpenAI, original upper-bound paper (2026)](https://github.com/openai/math/blob/main/preprints/Matrix-Multiplication-Nine-Fourths-October-2-2026/build/paper.tex).
 
