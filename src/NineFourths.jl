@@ -1,5 +1,7 @@
 module NineFourths
 
+using Nemo: Nemo
+
 export BilinearScheme, multiplication_scheme, verify_scheme, multiply
 
 include("coefficients.jl")

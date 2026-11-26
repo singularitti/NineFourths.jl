@@ -34,7 +34,9 @@ function _finish_field_phases(terms, zero_value)
     return FieldPhaseSum(terms, zero_value)
 end
 
-function _field_phase_coefficient(embed, coefficient::PhaseSum, zero_value=embed(big(0) // 1))
+function _field_phase_coefficient(
+    embed, coefficient::PhaseSum, zero_value=embed(big(0) // 1)
+)
     terms = _FieldPhaseTerms()
     for (phase, weight) in coefficient.terms
         _add_field_phase!(terms, phase, embed(weight), zero_value)
@@ -76,7 +78,9 @@ _field_mul(left, right::FieldPhaseSum) = _field_mul(right, left)
 function _field_mul(left::FieldPhaseSum, right::FieldPhaseSum)
     terms = _FieldPhaseTerms()
     for (phase, weight) in left.terms, (other_phase, other_weight) in right.terms
-        _add_field_phase!(terms, phase + other_phase, weight * other_weight, left.zero_value)
+        _add_field_phase!(
+            terms, phase + other_phase, weight * other_weight, left.zero_value
+        )
     end
     return _finish_field_phases(terms, left.zero_value)
 end

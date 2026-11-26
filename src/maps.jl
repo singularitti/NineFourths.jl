@@ -8,10 +8,9 @@ struct LegMap
     entry::Function
     support::Union{Nothing,Function}
     selection::Union{Nothing,Function}
-
     function LegMap(in_dim, out_dim, entry, support=nothing, selection=nothing)
         in_dim >= 1 && out_dim >= 1 || throw(ArgumentError("empty tensor leg"))
-        new(big(in_dim), big(out_dim), entry, support, selection)
+        return new(big(in_dim), big(out_dim), entry, support, selection)
     end
 end
 
@@ -26,7 +25,10 @@ end
 function row_entries(m::LegMap, row::Integer)
     1 <= row <= m.out_dim || throw(BoundsError(m, row))
     isnothing(m.support) || return m.support(big(row))
-    return ((col, weight) for col in 1:m.in_dim for weight in (m.entry(row, col),) if !iszero(weight))
+    return (
+        (col, weight) for col in 1:m.in_dim for
+        weight in (m.entry(row, col),) if !iszero(weight)
+    )
 end
 
 """A row selects one source variable with coefficient one, or zero if its index is zero."""
@@ -35,21 +37,32 @@ function selection_map(in_dim, out_dim, source_column)
         col = source_column(row)
         return iszero(col) ? () : ((col, 1),)
     end
-    return LegMap(in_dim, out_dim, (row, col) -> Int(source_column(row) == col), entries, source_column)
+    return LegMap(
+        in_dim,
+        out_dim,
+        (row, col) -> Int(source_column(row) == col),
+        entries,
+        source_column,
+    )
 end
 
 struct TensorRestriction
     legs::NTuple{3,LegMap}
 end
-TensorRestriction(x::LegMap, y::LegMap, z::LegMap) = TensorRestriction((x,y,z))
+
+TensorRestriction(x::LegMap, y::LegMap, z::LegMap) = TensorRestriction((x, y, z))
 source_dims(r::TensorRestriction) = map(m -> m.in_dim, r.legs)
 target_dims(r::TensorRestriction) = map(m -> m.out_dim, r.legs)
 unit_dims(k::Integer) = (big(k), big(k), big(k))
 mm_dims(k::Integer) = unit_dims(big(k)^2)
-identity_restriction(dims) = TensorRestriction(ntuple(i -> selection_map(dims[i], dims[i], identity), 3))
+
+function identity_restriction(dims)
+    return TensorRestriction(ntuple(i -> selection_map(dims[i], dims[i], identity), 3))
+end
 
 function _compose_maps(a::LegMap, b::LegMap)
-    a.out_dim == b.in_dim || throw(DimensionMismatch("tensor restriction endpoints do not match"))
+    a.out_dim == b.in_dim ||
+        throw(DimensionMismatch("tensor restriction endpoints do not match"))
     if !isnothing(a.selection) && !isnothing(b.selection)
         function source_col(row)
             mid = b.selection(row)
@@ -67,12 +80,20 @@ function _compose_maps(a::LegMap, b::LegMap)
     end
     # Contributions at the same source index may occur several times.
     # Downstream contractions add them, including exact cancellations.
-    entries(row) = ((col, v*w) for (mid, w) in row_entries(b,row) for (col,v) in row_entries(a,mid))
+    function entries(row)
+        return (
+            (col, v * w) for (mid, w) in row_entries(b, row) for
+            (col, v) in row_entries(a, mid)
+        )
+    end
     return LegMap(a.in_dim, b.out_dim, entry, entries)
 end
 
 compose_restrictions(r::TensorRestriction) = r
-function compose_restrictions(first::TensorRestriction, second::TensorRestriction, rest::TensorRestriction...)
+
+function compose_restrictions(
+    first::TensorRestriction, second::TensorRestriction, rest::TensorRestriction...
+)
     composed = TensorRestriction(map(_compose_maps, first.legs, second.legs))
     return isempty(rest) ? composed : foldl(compose_restrictions, rest; init=composed)
 end
@@ -95,14 +116,20 @@ function _product_maps(a::LegMap, b::LegMap)
     end
     function entries(row)
         j, i = divrem(row - 1, a.out_dim)
-        return ((x + a.in_dim * (y-1), v*w) for (y,w) in row_entries(b,j+1) for (x,v) in row_entries(a,i+1))
+        return (
+            (x + a.in_dim * (y - 1), v * w) for (y, w) in row_entries(b, j + 1) for
+            (x, v) in row_entries(a, i + 1)
+        )
     end
     return LegMap(src, dst, entry, entries)
 end
 
 product_restriction() = identity_restriction(unit_dims(1))
 product_restriction(r::TensorRestriction) = r
-function product_restriction(a::TensorRestriction, b::TensorRestriction, rest::TensorRestriction...)
+
+function product_restriction(
+    a::TensorRestriction, b::TensorRestriction, rest::TensorRestriction...
+)
     ab = TensorRestriction(map(_product_maps, a.legs, b.legs))
     return isempty(rest) ? ab : foldl(product_restriction, rest; init=ab)
 end
@@ -113,12 +140,13 @@ function power_restriction(r::TensorRestriction, n::Integer)
     n == 1 && return r
     half = power_restriction(r, n ÷ 2)
     square = product_restriction(half, half)
-    return iseven(n) ? square : product_restriction(square,r)
+    return iseven(n) ? square : product_restriction(square, r)
 end
 
 # All products use first-factor-fastest coordinates, including tensor powers.
 function permute_factors(dimensions, order)
-    sort(collect(order)) == collect(1:length(dimensions)) || throw(ArgumentError("invalid permutation of tensor factors"))
+    sort(collect(order)) == collect(1:length(dimensions)) ||
+        throw(ArgumentError("invalid permutation of tensor factors"))
     legs = ntuple(3) do leg
         dims = [big(d[leg]) for d in dimensions]
         strides = BigInt[]
@@ -135,7 +163,7 @@ function permute_factors(dimensions, order)
             end
             return col
         end
-        selection_map(total, total, source_col)
+        return selection_map(total, total, source_col)
     end
     return TensorRestriction(legs)
 end
@@ -145,18 +173,18 @@ function mm_product(sides)
     all(>(0), ns) || throw(ArgumentError("matrix dimensions must be positive"))
     side = prod(ns; init=big(1))
     function source_col(row)
-        y, x = divrem(row-1, side)
+        y, x = divrem(row - 1, side)
         col, stride = big(1), big(1)
         for n in ns
-            x, i = divrem(x,n)
-            y, j = divrem(y,n)
-            col += stride * (i + n*j)
+            x, i = divrem(x, n)
+            y, j = divrem(y, n)
+            col += stride * (i + n * j)
             stride *= n^2
         end
         return col
     end
     leg = selection_map(side^2, side^2, source_col)
-    return TensorRestriction(leg,leg,leg)
+    return TensorRestriction(leg, leg, leg)
 end
 
 function mm_split(source_side::Integer, sides)
@@ -165,24 +193,24 @@ function mm_split(source_side::Integer, sides)
     side = prod(ns; init=big(1))
     side <= source_side || throw(DimensionMismatch("matrix product does not fit in source"))
     function source_col(row)
-        packed, x, y, stride = row-1, big(0), big(0), big(1)
+        packed, x, y, stride = row - 1, big(0), big(0), big(1)
         for n in ns
-            packed, digit = divrem(packed,n^2)
-            j,i = divrem(digit,n)
-            x += stride*i
-            y += stride*j
+            packed, digit = divrem(packed, n^2)
+            j, i = divrem(digit, n)
+            x += stride * i
+            y += stride * j
             stride *= n
         end
-        return 1 + x + big(source_side)*y
+        return 1 + x + big(source_side) * y
     end
     leg = selection_map(big(source_side)^2, side^2, source_col)
-    return TensorRestriction(leg,leg,leg)
+    return TensorRestriction(leg, leg, leg)
 end
 
 function unit_trim(k::Integer, t::Integer)
     1 <= t <= k || throw(DimensionMismatch("unit tensor cannot supply requested dimension"))
     leg = selection_map(k, t, identity)
-    return TensorRestriction(leg,leg,leg)
+    return TensorRestriction(leg, leg, leg)
 end
 
 """Classical rank decomposition of a catalyst matrix tensor, with (i,k,j) digits."""
@@ -193,22 +221,30 @@ function unit_to_mm(n::Integer)
         function entries(row)
             y, x = divrem(row - 1, b)
             if leg == 1
-                return ((row + b^2*j, 1) for j in 0:b-1)
+                return ((row + b^2 * j, 1) for j in 0:(b - 1))
             elseif leg == 2
-                return ((1 + i + b*(row-1), 1) for i in 0:b-1)
+                return ((1 + i + b * (row - 1), 1) for i in 0:(b - 1))
             end
-            return ((1 + x + b*k + b^2*y, 1) for k in 0:b-1)
+            return ((1 + x + b * k + b^2 * y, 1) for k in 0:(b - 1))
         end
         function entry(row, col)
-            kj, i = divrem(col-1, b)
+            kj, i = divrem(col - 1, b)
             j, k = divrem(kj, b)
-            expected = leg == 1 ? i+b*k : leg == 2 ? k+b*j : i+b*j
-            return Int(row == 1+expected)
+            expected = if leg == 1
+                i + b * k
+            elseif leg == 2
+                k + b * j
+            else
+                i + b * j
+            end
+            return Int(row == 1 + expected)
         end
         return LegMap(b^3, b^2, entry, entries)
     end
-    return TensorRestriction(ntuple(leg_map,3))
+    return TensorRestriction(ntuple(leg_map, 3))
 end
 
 """Discard a factor known to have coefficient one at coordinate (1,1,1)."""
-discard_restriction(dims) = TensorRestriction(ntuple(i -> selection_map(dims[i], 1, _ -> 1),3))
+function discard_restriction(dims)
+    return TensorRestriction(ntuple(i -> selection_map(dims[i], 1, _ -> 1), 3))
+end

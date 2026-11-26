@@ -1,10 +1,7 @@
-import Nemo
-
 # These scalars have only a value-level field interface. In particular, they
 # lack zero(T), one(T), conversion to Julia numbers, and array multiplication.
 struct TestValueRational
     value::Rational{BigInt}
-
     TestValueRational(value::Rational{BigInt}) = new(value)
 end
 
@@ -45,11 +42,13 @@ end
 Base.:+(x::TestValueResidue, y::TestValueResidue) = test_residue_binary(+, x, y)
 Base.:-(x::TestValueResidue, y::TestValueResidue) = test_residue_binary(-, x, y)
 Base.:*(x::TestValueResidue, y::TestValueResidue) = test_residue_binary(*, x, y)
-Base.:(==)(x::TestValueResidue, y::TestValueResidue) = x.field == y.field && x.value == y.value
+
+function Base.:(==)(x::TestValueResidue, y::TestValueResidue)
+    return x.field == y.field && x.value == y.value
+end
 
 struct TestIntegerResidue <: Integer
     value::Int
-
     TestIntegerResidue(value::Int) = new(mod(value, 5))
 end
 
@@ -58,22 +57,41 @@ Base.one(::TestIntegerResidue) = TestIntegerResidue(1)
 Base.iszero(x::TestIntegerResidue) = iszero(x.value)
 Base.inv(x::TestIntegerResidue) = TestIntegerResidue(invmod(x.value, 5))
 Base.:-(x::TestIntegerResidue) = TestIntegerResidue(-x.value)
-Base.:+(x::TestIntegerResidue, y::TestIntegerResidue) = TestIntegerResidue(x.value + y.value)
-Base.:-(x::TestIntegerResidue, y::TestIntegerResidue) = TestIntegerResidue(x.value - y.value)
-Base.:*(x::TestIntegerResidue, y::TestIntegerResidue) = TestIntegerResidue(x.value * y.value)
+
+function Base.:+(x::TestIntegerResidue, y::TestIntegerResidue)
+    return TestIntegerResidue(x.value + y.value)
+end
+
+function Base.:-(x::TestIntegerResidue, y::TestIntegerResidue)
+    return TestIntegerResidue(x.value - y.value)
+end
+
+function Base.:*(x::TestIntegerResidue, y::TestIntegerResidue)
+    return TestIntegerResidue(x.value * y.value)
+end
+
 Base.:(==)(x::TestIntegerResidue, y::TestIntegerResidue) = x.value == y.value
 
 struct TestCallableScalar
     value::Int
-
     TestCallableScalar(value::Int) = new(mod(value, 5))
 end
 
 Base.inv(x::TestCallableScalar) = TestCallableScalar(invmod(x.value, 5))
 Base.:-(x::TestCallableScalar) = TestCallableScalar(-x.value)
-Base.:+(x::TestCallableScalar, y::TestCallableScalar) = TestCallableScalar(x.value + y.value)
-Base.:-(x::TestCallableScalar, y::TestCallableScalar) = TestCallableScalar(x.value - y.value)
-Base.:*(x::TestCallableScalar, y::TestCallableScalar) = TestCallableScalar(x.value * y.value)
+
+function Base.:+(x::TestCallableScalar, y::TestCallableScalar)
+    return TestCallableScalar(x.value + y.value)
+end
+
+function Base.:-(x::TestCallableScalar, y::TestCallableScalar)
+    return TestCallableScalar(x.value - y.value)
+end
+
+function Base.:*(x::TestCallableScalar, y::TestCallableScalar)
+    return TestCallableScalar(x.value * y.value)
+end
+
 Base.:(==)(x::TestCallableScalar, y::TestCallableScalar) = x.value == y.value
 
 function field_product_reference(A, B, additive_identity)
@@ -96,13 +114,17 @@ function generic_strassen(; scaled=false)
     return NineFourths.explicit_scheme(U, V, W)
 end
 
-@testset "Compiled paper baseline over finite fields" begin
+@testset "Compiled Shpilka baseline over finite fields" begin
     nodes = [NineFourths.DerivationNode(1, 2, 2 // 1, :baseline, ())]
     witness = NineFourths.compile_witness(nodes, 1)
     scheme = NineFourths.LoweredScheme(NineFourths.seed_decomposition(1, 2), witness)
     extension, generator = Nemo.finite_field(2, 2, :u)
-    cases = ((Nemo.GF(2), 0, (3, 5, 2)), (Nemo.GF(3), 0, (5, 2, 3)),
-             (Nemo.Native.GF(5), 0, (2, 3, 5)), (extension, generator, (3, 5, 4)))
+    cases = (
+        (Nemo.GF(2), 0, (3, 5, 2)),
+        (Nemo.GF(3), 0, (5, 2, 3)),
+        (Nemo.Native.GF(5), 0, (2, 3, 5)),
+        (extension, generator, (3, 5, 4)),
+    )
     for (F, a, (m, k, n)) in cases
         A = [F(i - 2j) + F(a) * F(i * j + j) for i in 1:m, j in 1:k]
         B = [F(i + 3j) + F(a) * F(i + j + 1) for i in 1:k, j in 1:n]
@@ -120,8 +142,9 @@ end
     # orientation, enlarging the rank from 2^6 to 3^6.
     F2 = Nemo.GF(2)
     a = [one(F2);;]
-    @test_throws NineFourths.ExecutionInfeasible multiply(a, a, scheme;
-                                                          max_coefficient_visits=500)
+    @test_throws NineFourths.ExecutionInfeasible multiply(
+        a, a, scheme; max_coefficient_visits=500
+    )
     @test multiply(a, a, scheme; max_coefficient_visits=500, fallback=:classical) == a
 
     padded_seed = NineFourths.seed_decomposition(1, 2; admissible_order=isodd)
@@ -130,15 +153,15 @@ end
         a = [one(F);;]
         @test multiply(a, a, specialized; max_coefficient_visits=3 * 64) == a
     end
-    @test_throws NineFourths.ExecutionInfeasible multiply([one(F2);;], [one(F2);;],
-                                                          specialized; max_coefficient_visits=3 * 64)
+    @test_throws NineFourths.ExecutionInfeasible multiply(
+        [one(F2);;], [one(F2);;], specialized; max_coefficient_visits=3 * 64
+    )
 end
 
 @testset "Fourier separation with an admissible odd order" begin
     transition = NineFourths.midpoint_transition(1, 2, 1, 1, 2)
     t = NineFourths.root_of_unity(3)
-    restriction = NineFourths.transition_restriction(transition, 2, t;
-                                                     admissible_order=3)
+    restriction = NineFourths.transition_restriction(transition, 2, t; admissible_order=3)
     for leg_map in restriction.legs
         entries = collect(NineFourths.row_entries(leg_map, 1))
         @test length(entries) == 3^6
@@ -153,8 +176,8 @@ end
     # keeps the selected type, cancels the other label, and retains its
     # positive-degree term when the matrix digits compensate for the label.
     changed_matrix_column = 1 + 2^6 * 81 * 4
-    for (rows, expected) in (((1, 1, 1), 1), ((2, 1, 1), 0),
-                             ((2, 1, changed_matrix_column), t))
+    for (rows, expected) in
+        (((1, 1, 1), 1), ((2, 1, 1), 0), ((2, 1, changed_matrix_column), t))
         entries = map(NineFourths.row_entries, restriction.legs, rows)
         actual = sum(zip(entries...); init=0 // big(1)) do terms
             source = scalar_midpoint_source_coefficient(map(first, terms))
@@ -176,7 +199,7 @@ end
     row = 64 * (sector_test_pack((1, 1, 5, 1, 4, 5), (8, 2, 10, 2, 8, 10)) - 1) + 1
     weight = inv(t)
     @test Dict(NineFourths.row_entries(first_stage.legs[2], row)) ==
-          Dict(65 => -weight, (64 * 1600 * 4 + 1) => weight)
+        Dict(65 => -weight, (64 * 1600 * 4 + 1) => weight)
 
     # A degree-six stage cannot average seven evaluations in characteristic
     # seven. Eight evaluations still recover its constant coefficient.
@@ -219,7 +242,9 @@ end
     C = multiply(A, B, scaled)
     @test C == expected
     @test C isa Matrix{TestValueResidue}
-    @test_throws NineFourths.ExecutionInfeasible multiply(A, B, scaled; max_coefficient_visits=0)
+    @test_throws NineFourths.ExecutionInfeasible multiply(
+        A, B, scaled; max_coefficient_visits=0
+    )
     C = multiply(A, B, scaled; fallback=:classical, max_coefficient_visits=0)
     @test C == expected
     @test C isa Matrix{TestValueResidue}
@@ -231,7 +256,7 @@ end
     right = F2.([1 1; 1 0; 0 1])
     @test_throws NineFourths.CoefficientIncompatible multiply(left, right, scaled)
     @test multiply(left, right, scaled; fallback=:classical) ==
-          field_product_reference(left, right, zero(F2))
+        field_product_reference(left, right, zero(F2))
 end
 
 @testset "Runtime parents and compatible empty dimensions" begin
@@ -248,8 +273,9 @@ end
     incompatible = copy(A)
     incompatible[end] = other(1)
     @test_throws Union{ArgumentError,DomainError} multiply(incompatible, B, scheme)
-    @test_throws Union{ArgumentError,DomainError} multiply(A, other.([1 1; 2 1; 0 0]), scheme;
-                                                          fallback=:classical)
+    @test_throws Union{ArgumentError,DomainError} multiply(
+        A, other.([1 1; 2 1; 0 0]), scheme; fallback=:classical
+    )
     @test_throws Union{ArgumentError,DomainError} multiply(A, B, scheme; field=other)
 
     a = Nemo.matrix(Nemo.QQ, [1//2 2//3 3//4; -1//3 1//4 0//1])
@@ -270,8 +296,10 @@ end
     FqElement = typeof(zero(F))
     left, right = Matrix{FqElement}(undef, 3, 0), Matrix{FqElement}(undef, 0, 5)
     @test_throws Union{ArgumentError,DomainError} multiply(left, right, scheme)
-    for (left, right, keywords) in ((left, right, (; field=F)),
-             (Nemo.zero_matrix(F, 3, 0), Nemo.zero_matrix(F, 0, 5), (;)))
+    for (left, right, keywords) in (
+        (left, right, (; field=F)),
+        (Nemo.zero_matrix(F, 3, 0), Nemo.zero_matrix(F, 0, 5), (;)),
+    )
         zero_product = multiply(left, right, scheme; keywords...)
         @test size(zero_product) == (3, 5)
         @test zero_product isa Matrix{FqElement}
@@ -283,19 +311,22 @@ end
     right = Matrix{TestValueResidue}(undef, 0, 4)
     @test_throws Union{ArgumentError,DomainError} multiply(left, right, scheme)
     @test multiply(left, right, scheme; field=runtime) == fill(zero(runtime), 2, 4)
-    @test_throws DimensionMismatch multiply(left, fill(one(runtime), 1, 4), scheme;
-                                            field=runtime, fallback=:classical)
+    @test_throws DimensionMismatch multiply(
+        left, fill(one(runtime), 1, 4), scheme; field=runtime, fallback=:classical
+    )
 
     left = Matrix{TestValueRational}(undef, 2, 0)
     right = Matrix{TestValueRational}(undef, 0, 3)
     @test multiply(left, right, scheme; field=test_value_q(2, 3)) ==
-          fill(test_value_q(0), 2, 3)
+        fill(test_value_q(0), 2, 3)
 end
 
 @testset "Custom scalar identity and widening rules" begin
     scheme = generic_strassen(; scaled=true)
-    variants = ((TestIntegerResidue, (;)),
-                (TestCallableScalar, (; field=n -> TestCallableScalar(Int(n)))))
+    variants = (
+        (TestIntegerResidue, (;)),
+        (TestCallableScalar, (; field=n -> TestCallableScalar(Int(n)))),
+    )
     @testset "$element" for (element, kwargs) in variants
         A = [element(i - 2j) for i in 1:3, j in 1:2]
         B = [element(2i + j) for i in 1:2, j in 1:5]
@@ -328,9 +359,9 @@ end
 
     # Applying a factor of 1/2 to the smallest Float32 rounds to zero.
     # Exact rational intermediates followed by one conversion would keep it.
-    subnormal = nextfloat(0f0)
+    subnormal = nextfloat(0.0f0)
     scaled_product = NineFourths.explicit_scheme([1//2;;], [1;;], [2;;])
-    C = multiply([subnormal;;], [1f0;;], scaled_product)
+    C = multiply([subnormal;;], [1.0f0;;], scaled_product)
     @test C isa Matrix{Float32}
     @test iszero(only(C))
 
@@ -340,8 +371,9 @@ end
     reciprocal = BilinearScheme([x;;], [1;;], [inv(x);;])
     @test multiply(Float32[2;;], Float32[3;;], reciprocal) == Float32[6;;]
 
-    zero_product = multiply(Matrix{Float32}(undef, 2, 0),
-                            Matrix{Float32}(undef, 0, 3), scheme; field=Float32)
+    zero_product = multiply(
+        Matrix{Float32}(undef, 2, 0), Matrix{Float32}(undef, 0, 3), scheme; field=Float32
+    )
     @test zero_product == zeros(Float32, 2, 3)
     @test zero_product isa Matrix{Float32}
 end
@@ -352,8 +384,9 @@ end
     @test a^2 == K(2)
     bare = generic_strassen()
     # Scale each input form by a, then cancel a inside the same number field.
-    native = BilinearScheme(map(w -> K(w) * a, bare.U), map(K, bare.V),
-                            map(w -> K(w) * inv(a), bare.W))
+    native = BilinearScheme(
+        map(w -> K(w) * a, bare.U), map(K, bare.V), map(w -> K(w) * inv(a), bare.W)
+    )
     @test native[1, 1, 1] == a
     @test verify_scheme(native).identity == :exact_coefficients
     A = [K(i) + a * j for i in 1:5, j in 1:3]
@@ -373,8 +406,9 @@ end
     @test verify_scheme(native_weights).valid
     wrong_weights = BilinearScheme([F(2);;], [one(F);;], [F(4);;])
     @test !verify_scheme(wrong_weights).valid
-    @test_throws Union{ArgumentError,DomainError} multiply([Nemo.QQ(1//5);;], [F(4);;],
-                                                           scalar; field=F, fallback=:classical)
+    @test_throws Union{ArgumentError,DomainError} multiply(
+        [Nemo.QQ(1//5);;], [F(4);;], scalar; field=F, fallback=:classical
+    )
 
     scaled = BilinearScheme([1//2;;], [2;;], [1;;])
     integer_product = multiply([Nemo.ZZ(7);;], [Nemo.ZZ(3);;], scaled)

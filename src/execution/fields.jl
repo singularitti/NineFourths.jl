@@ -2,6 +2,7 @@
 struct CoefficientIncompatible <: Exception
     message::String
 end
+
 Base.showerror(io::IO, error::CoefficientIncompatible) = print(io, error.message)
 
 const FieldMatrix = Union{AbstractMatrix,Nemo.MatElem,Nemo.MatRingElem}
@@ -62,8 +63,12 @@ function _field_rational(one_value, value::Rational; coefficient=true)
         return _field_quotient(num, embedded_den)
     catch error
         error isa Union{
-            MethodError,InexactError,DomainError,DivideError,ArgumentError,
-            Nemo.AbstractAlgebra.NotInvertibleError
+            MethodError,
+            InexactError,
+            DomainError,
+            DivideError,
+            ArgumentError,
+            Nemo.AbstractAlgebra.NotInvertibleError,
         } || rethrow()
         message = "rational denominator is not invertible in the target field"
         throw(coefficient ? CoefficientIncompatible(message) : DomainError(value, message))
@@ -75,6 +80,7 @@ function _field_unit_integer(one_value, n::Integer)
 end
 
 _matrix_field(::AbstractMatrix) = nothing
+
 function _matrix_field(matrix::Union{Nemo.MatElem,Nemo.MatRingElem})
     domain = Nemo.base_ring(matrix)
     return domain isa _TypeBasedParent ? nothing : domain
@@ -95,7 +101,7 @@ function _common_field(a, b)
     b === Nemo.ZZ && return a
     a === Nemo.QQ && return b
     b === Nemo.QQ && return a
-    throw(ArgumentError("matrix entries belong to different field parents"))
+    return throw(ArgumentError("matrix entries belong to different field parents"))
 end
 
 _is_nemo_prime_domain(domain) = domain === Nemo.ZZ || domain === Nemo.QQ
@@ -104,7 +110,11 @@ function _requested_field(source, target)
     if isnothing(source) || source === target || _is_nemo_prime_domain(source)
         return target
     end
-    throw(ArgumentError("matrix entries belong to a different parent than the requested field"))
+    return throw(
+        ArgumentError(
+            "matrix entries belong to a different parent than the requested field"
+        ),
+    )
 end
 
 _prime_scalar(value::Nemo.ZZRingElem) = BigInt(value)
@@ -138,7 +148,8 @@ function _field_metadata(A, B)
                 if value isa _BuiltinRational
                     rational_entries = true
                     den = denominator(value)
-                    iszero(den) && throw(DomainError(value, "matrix entries must be finite"))
+                    iszero(den) &&
+                        throw(DomainError(value, "matrix entries must be finite"))
                     fractional_entries |= den != 1
                 end
             else
@@ -150,7 +161,9 @@ function _field_metadata(A, B)
             end
         end
     end
-    return (; domain, scalar_type, sample, rational_entries, fractional_entries, exact_entries)
+    return (;
+        domain, scalar_type, sample, rational_entries, fractional_entries, exact_entries
+    )
 end
 
 function _optional_identity(operation, reference)
@@ -210,7 +223,6 @@ function _field_configuration(metadata, field)
         callable = false
         domain = nothing
     end
-
     zero_value, one_value = _field_identities(reference, callable)
     if field isa Type
         if isnothing(zero_value) && !isnothing(domain)
@@ -223,7 +235,9 @@ function _field_configuration(metadata, field)
         domain = _requested_field(domain, _scalar_field(zero_value))
     elseif !isnothing(field) && _callable_field(field)
         parent_of_zero = _scalar_field(zero_value)
-        domain = _requested_field(domain, isnothing(parent_of_zero) ? field : parent_of_zero)
+        domain = _requested_field(
+            domain, isnothing(parent_of_zero) ? field : parent_of_zero
+        )
     elseif !isnothing(field)
         domain = _requested_field(domain, _scalar_field(zero_value))
     end
@@ -236,7 +250,9 @@ function _field_configuration(metadata, field)
     else
         output_type = Any
     end
-    return (; zero=zero_value, one=one_value, eltype=output_type, parent=domain, legacy, converter)
+    return (;
+        zero=zero_value, one=one_value, eltype=output_type, parent=domain, legacy, converter
+    )
 end
 
 function _field_entry(options, value)
@@ -247,8 +263,11 @@ function _field_entry(options, value)
         if T <: Union{_BuiltinExact,AbstractFloat,Complex}
             return convert(T, value)
         end
-        return value isa _BuiltinInteger ? _field_integer(options.one, value) :
-               _field_rational(options.one, value; coefficient=false)
+        return if value isa _BuiltinInteger
+            _field_integer(options.one, value)
+        else
+            _field_rational(options.one, value; coefficient=false)
+        end
     end
     if !isnothing(options.converter) && applicable(options.converter, value)
         return options.converter(value)
@@ -265,7 +284,11 @@ function _field_embed_native(options, value)
     end
     domain = _scalar_field(value)
     if !isnothing(domain) && domain !== options.parent
-        throw(CoefficientIncompatible("scheme coefficient belongs to a different field parent"))
+        throw(
+            CoefficientIncompatible(
+                "scheme coefficient belongs to a different field parent"
+            ),
+        )
     end
     try
         return _field_entry(options, value)
@@ -303,18 +326,28 @@ function _field_inputs(A::FieldMatrix, B::FieldMatrix; field=nothing)
     k == inner || throw(DimensionMismatch("matrix inner dimensions must agree"))
     options = _field_configuration(_field_metadata(A, B), field)
     if (m > 0 && n > 0) && isnothing(options.zero)
-        throw(ArgumentError("cannot determine the additive identity of the input field; supply field"))
+        throw(
+            ArgumentError(
+                "cannot determine the additive identity of the input field; supply field"
+            ),
+        )
     end
     if iszero(m) || iszero(k) || iszero(n)
         return (; left=nothing, right=nothing, options...)
     end
-    isnothing(options.one) &&
-        throw(ArgumentError("cannot determine the multiplicative identity of the input field; supply field"))
+    isnothing(options.one) && throw(
+        ArgumentError(
+            "cannot determine the multiplicative identity of the input field; supply field",
+        ),
+    )
     if options.legacy
         return (; left=_legacy_matrix(A), right=_legacy_matrix(B), options...)
     end
     convert_entry(value) = _field_entry(options, value)
     T = options.eltype
-    return (; left=_copy_field_matrix(convert_entry, A, T),
-            right=_copy_field_matrix(convert_entry, B, T), options...)
+    return (;
+        left=_copy_field_matrix(convert_entry, A, T),
+        right=_copy_field_matrix(convert_entry, B, T),
+        options...,
+    )
 end

@@ -16,7 +16,9 @@ function _sample_order(admissible_order, preferred, alternate)
     isnothing(admissible_order) && return preferred
     admissible_order(preferred) && return preferred
     admissible_order(alternate) && return alternate
-    throw(ArgumentError("neither root-of-unity order is invertible in the coefficient field"))
+    return throw(
+        ArgumentError("neither root-of-unity order is invertible in the coefficient field")
+    )
 end
 
 """
@@ -41,8 +43,11 @@ function rank_coefficient(
     order = rank_count(decomposition)
     exponent = (BigInt(term) - 1) * (BigInt(coordinate) - 1)
     # The inverse Vandermonde is the conjugate transform divided by its side.
-    return leg == 3 ? root_of_unity(order, -exponent) / order :
-           root_of_unity(order, exponent)
+    return if leg == 3
+        root_of_unity(order, -exponent) / order
+    else
+        root_of_unity(order, exponent)
+    end
 end
 
 struct SeedDecomposition
@@ -63,18 +68,26 @@ function seed_decomposition(a::Integer, b::Integer, m::Integer=1; admissible_ord
     polynomial = polynomial_decomposition(a, b; admissible_order)
     copies = BigInt(m)
     dimensions = map(dimension -> dimension^copies, seed_dims(a, b))
-    return SeedDecomposition(polynomial, copies, dimensions, rank_count(polynomial)^(6copies))
+    return SeedDecomposition(
+        polynomial, copies, dimensions, rank_count(polynomial)^(6copies)
+    )
 end
 
 Base.size(decomposition::SeedDecomposition) = decomposition.dimensions
-Base.size(decomposition::Union{PolynomialDecomposition,SeedDecomposition}, leg::Integer) =
-    size(decomposition)[leg]
+
+function Base.size(
+    decomposition::Union{PolynomialDecomposition,SeedDecomposition}, leg::Integer
+)
+    return size(decomposition)[leg]
+end
+
 rank_count(decomposition::SeedDecomposition) = decomposition.terms
 
 function check_rank_coordinate(decomposition, term, leg, coordinate)
     1 <= leg <= 3 || throw(BoundsError(1:3, leg))
     1 <= term <= rank_count(decomposition) || throw(BoundsError(decomposition, term))
-    1 <= coordinate <= size(decomposition)[leg] || throw(BoundsError(decomposition, coordinate))
+    1 <= coordinate <= size(decomposition)[leg] ||
+        throw(BoundsError(decomposition, coordinate))
     return nothing
 end
 
@@ -89,7 +102,9 @@ function rank_coefficient(
     for _ in 1:decomposition.copies, permutation in LEG_PERMUTATIONS
         original_leg = permutation[leg]
         term_index, term_digit = divrem(term_index, order)
-        coordinate_index, coordinate_digit = divrem(coordinate_index, size(polynomial)[original_leg])
+        coordinate_index, coordinate_digit = divrem(
+            coordinate_index, size(polynomial)[original_leg]
+        )
         local_exponent = term_digit * coordinate_digit
         exponent += original_leg == 3 ? -local_exponent : local_exponent
     end
@@ -112,7 +127,6 @@ function baseline_source_coordinate(
     else
         (column, row, unused)
     end
-
     source = big(0)
     stride = big(1)
     for permutation in LEG_PERMUTATIONS
@@ -137,10 +151,15 @@ function seed_matrix_selection(a, b, target_dimensions, matrix_coordinate)
     legs = ntuple(3) do leg
         source_column = function (row)
             return baseline_source_coordinate(
-                dimensions, scalar_leg, leg, matrix_size, digit_base, matrix_coordinate(row)
+                dimensions,
+                scalar_leg,
+                leg,
+                matrix_size,
+                digit_base,
+                matrix_coordinate(row),
             )
         end
-        selection_map(source_dimensions[leg], target_dimensions[leg], source_column)
+        return selection_map(source_dimensions[leg], target_dimensions[leg], source_column)
     end
     return TensorRestriction(legs...)
 end
@@ -154,5 +173,7 @@ end
 function seed_unit(a::Integer, b::Integer)
     matrix_size = BigInt(max(a, b))^2
     matrix_size >= 2 || throw(ArgumentError("a seed of size (1,1) cannot restrict to I₂"))
-    return seed_matrix_selection(a, b, unit_dims(2), row -> 1 + (row - 1) * (matrix_size + 1))
+    return seed_matrix_selection(
+        a, b, unit_dims(2), row -> 1 + (row - 1) * (matrix_size + 1)
+    )
 end

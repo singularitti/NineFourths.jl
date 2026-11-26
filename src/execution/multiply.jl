@@ -1,7 +1,8 @@
 function _zero_matrix(::Type{T}, m, n, zero_value) where {T}
     C = Matrix{T}(undef, m, n)
     isempty(C) && return C
-    isnothing(zero_value) && throw(ArgumentError("the output needs a zero in the input field"))
+    isnothing(zero_value) &&
+        throw(ArgumentError("the output needs a zero in the input field"))
     return fill!(C, zero_value)
 end
 
@@ -16,8 +17,9 @@ function _classical_product(A, B, zero_value, T, add=+, product=*)
     return C
 end
 
-function _accumulate_form!(form, source, scheme, domain, term, leg, side,
-                           active_rows, active_columns)
+function _accumulate_form!(
+    form, source, scheme, domain, term, leg, side, active_rows, active_columns
+)
     child_rows, child_columns = size(form)
     rows, columns = size(source)
     for block_column in 1:active_columns, block_row in 1:active_rows
@@ -29,14 +31,18 @@ function _accumulate_form!(form, source, scheme, domain, term, leg, side,
         rows_in_block = min(child_rows, rows - row_offset)
         columns_in_block = min(child_columns, columns - column_offset)
         for column in 1:columns_in_block, row in 1:rows_in_block
-            value = _field_apply(coefficient, source[row_offset + row, column_offset + column])
+            value = _field_apply(
+                coefficient, source[row_offset + row, column_offset + column]
+            )
             form[row, column] = _field_add(form[row, column], value)
         end
     end
     return nothing
 end
 
-function _accumulate_product!(C, product, scheme, domain, term, side, active_rows, active_columns)
+function _accumulate_product!(
+    C, product, scheme, domain, term, side, active_rows, active_columns
+)
     child_rows, child_columns = size(product)
     rows, columns = size(C)
     for block_column in 1:active_columns, block_row in 1:active_rows
@@ -86,7 +92,9 @@ _wide_product(a, b) = big(a) * b
 
 function _classical_fallback(inputs)
     product = inputs.legacy ? _wide_product : (*)
-    return _classical_product(inputs.left, inputs.right, inputs.zero, inputs.eltype, +, product)
+    return _classical_product(
+        inputs.left, inputs.right, inputs.zero, inputs.eltype, +, product
+    )
 end
 
 """
@@ -109,47 +117,66 @@ The visit budget bounds the coefficient visits across the recursive product.
 The workspace budget bounds live dense matrix entries, including normalized
 inputs and the result. The workspace budget also applies to classical fallback.
 """
-function multiply(A::FieldMatrix, B::FieldMatrix, scheme::BilinearScheme;
-                  fallback=:error, field=nothing,
-                  max_coefficient_visits::Integer=DEFAULT_COEFFICIENT_VISITS,
-                  max_workspace_entries::Integer=DEFAULT_WORKSPACE_ENTRIES)
-    fallback === :error || fallback === :classical ||
+function multiply(
+    A::FieldMatrix,
+    B::FieldMatrix,
+    scheme::BilinearScheme;
+    fallback=:error,
+    field=nothing,
+    max_coefficient_visits::Integer=DEFAULT_COEFFICIENT_VISITS,
+    max_workspace_entries::Integer=DEFAULT_WORKSPACE_ENTRIES,
+)
+    fallback === :error ||
+        fallback === :classical ||
         throw(ArgumentError("fallback must be :error or :classical"))
-    max_coefficient_visits >= 0 || throw(ArgumentError("max_coefficient_visits must be nonnegative"))
-    max_workspace_entries >= 0 || throw(ArgumentError("max_workspace_entries must be nonnegative"))
+    max_coefficient_visits >= 0 ||
+        throw(ArgumentError("max_coefficient_visits must be nonnegative"))
+    max_workspace_entries >= 0 ||
+        throw(ArgumentError("max_workspace_entries must be nonnegative"))
     m, k = size(A)
     right_rows, n = size(B)
     k == right_rows || throw(DimensionMismatch("input inner dimensions must match"))
     shape = (m, k, n)
-
     if any(iszero, shape)
         _check_zero_workspace(shape, scheme, max_workspace_entries)
         inputs = _field_inputs(A, B; field)
         return _zero_matrix(inputs.eltype, m, n, inputs.zero)
     end
-
-    plan = _execution_plan(shape, scheme, max_coefficient_visits, max_workspace_entries;
-                           dimensions_for=_minimum_dimensions)
+    plan = _execution_plan(
+        shape,
+        scheme,
+        max_coefficient_visits,
+        max_workspace_entries;
+        dimensions_for=_minimum_dimensions,
+    )
     if plan isa ExecutionInfeasible
         fallback === :classical || throw(plan)
         _check_classical_workspace(shape, scheme, max_workspace_entries)
         inputs = _field_inputs(A, B; field)
         return _classical_fallback(inputs)
     end
-
     inputs = _field_inputs(A, B; field)
     try
         arithmetic = _scheme_arithmetic(scheme, inputs)
         adapted, domain = arithmetic.scheme, arithmetic.domain
-        adapted_plan = adapted === scheme && !(scheme isa LoweredScheme) ? plan :
+        adapted_plan = if adapted === scheme && !(scheme isa LoweredScheme)
+            plan
+        else
             _execution_plan(shape, adapted, max_coefficient_visits, max_workspace_entries)
+        end
         if adapted_plan isa ExecutionInfeasible
             fallback === :classical || throw(adapted_plan)
             return _classical_fallback(inputs)
         end
-
-        result = _scheme_product(inputs.left, inputs.right, adapted, domain, inputs.zero,
-                                 adapted_plan.side, adapted_plan.rank)
+        result = _scheme_product(
+            inputs.left,
+            inputs.right,
+            adapted,
+            domain,
+            inputs.zero,
+            adapted_plan.side,
+            adapted_plan.rank,
+        )
         C = Matrix{inputs.eltype}(undef, m, n)
         for index in eachindex(C, result)
             C[index] = _field_result(domain, result[index])

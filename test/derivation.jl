@@ -1,19 +1,19 @@
-@testset "Paper parameters" begin
-    params = NineFourths.ConstructionParameters(5 // 2)
+@testset "Shpilka parameters" begin
+    params = NineFourths.ShpilkaParameters(5 // 2)
     @test params.target == 5 // 2
     @test params.epsilon == 1 // 4
     @test params.q == 256
     @test params.a == big(256) << 256
     @test params.step_bound == 256 * (2 * 256^2 + 7 * 256)
     @test params.length_bound == 4 * params.a
-    @test NineFourths.ConstructionParameters(10).q == 16
-    @test_throws DomainError NineFourths.ConstructionParameters(9 // 4)
-    @test_throws DomainError NineFourths.ConstructionParameters(2)
-    @test_throws DomainError NineFourths.ConstructionParameters(1 // 0)
-    @test_throws MethodError NineFourths.ConstructionParameters(2.5)
+    @test NineFourths.ShpilkaParameters(10).q == 16
+    @test_throws DomainError NineFourths.ShpilkaParameters(9 // 4)
+    @test_throws DomainError NineFourths.ShpilkaParameters(2)
+    @test_throws DomainError NineFourths.ShpilkaParameters(1 // 0)
+    @test_throws MethodError NineFourths.ShpilkaParameters(2.5)
 
     gap = 1 // big(10)^20
-    large = NineFourths.ConstructionParameters(9 // 4 + gap)
+    large = NineFourths.ShpilkaParameters(9 // 4 + gap)
     @test large.epsilon == gap
     @test large.q == 16 * big(10)^40
     @test large.a.coefficient == large.q
@@ -22,9 +22,9 @@
     @test large.length_bound.exponent == large.q
 end
 
-@testset "Paper derivation" begin
-    params = NineFourths.ConstructionParameters(13 // 4)
-    derivation = NineFourths.PaperDerivation(params)
+@testset "Shpilka derivation" begin
+    params = NineFourths.ShpilkaParameters(13 // 4)
+    derivation = NineFourths.ShpilkaDerivation(params)
     nodes = NineFourths.materialize_derivation(derivation)
     @test length(nodes) - 1 <= params.step_bound
     @test nodes[1].a == nodes[1].b == nodes[1].value == params.q

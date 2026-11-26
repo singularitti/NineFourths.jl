@@ -4,7 +4,8 @@ function sector_test_expand!(coefficients, maps, indices)
             maps[3](indices[3]) do z, z_coefficient
                 term = (x, y, z)
                 coefficient = x_coefficient * y_coefficient * z_coefficient
-                coefficients[term] = get(coefficients, term, big(0) // 1) + coefficient
+                return coefficients[term] =
+                    get(coefficients, term, big(0) // 1) + coefficient
             end
         end
     end
@@ -24,8 +25,8 @@ end
         observed = Dict()
         for copy in 1:2
             maps = ntuple(3) do leg
-                (emit, index) -> NineFourths.midpoint_column(emit, a, b, s, leg, copy,
-                                                             index, t)
+                (emit, index) ->
+                    NineFourths.midpoint_column(emit, a, b, s, leg, copy, index, t)
             end
             for i in 1:a, j in 1:b
                 sector_test_expand!(observed, maps, (i, j, i + j - 1))
@@ -72,15 +73,28 @@ end
 @testset "Fixed types and exact Fourier separation" begin
     sector_type = NineFourths.SectorType((2, 1, 1))
     words = [
-        (1, 1, 2, 3), (1, 1, 3, 2), (1, 2, 1, 3), (1, 2, 3, 1),
-        (1, 3, 1, 2), (1, 3, 2, 1), (2, 1, 1, 3), (2, 1, 3, 1),
-        (2, 3, 1, 1), (3, 1, 1, 2), (3, 1, 2, 1), (3, 2, 1, 1),
+        (1, 1, 2, 3),
+        (1, 1, 3, 2),
+        (1, 2, 1, 3),
+        (1, 2, 3, 1),
+        (1, 3, 1, 2),
+        (1, 3, 2, 1),
+        (2, 1, 1, 3),
+        (2, 1, 3, 1),
+        (2, 3, 1, 1),
+        (3, 1, 1, 2),
+        (3, 1, 2, 1),
+        (3, 2, 1, 1),
     ]
     @test sector_type.multiplicity == length(words)
-    @test all(NineFourths.type_rank(sector_type, word) == rank
-              for (rank, word) in enumerate(words))
-    @test all(Tuple(NineFourths.type_word(sector_type, rank)) == word
-              for (rank, word) in enumerate(words))
+    @test all(
+        NineFourths.type_rank(sector_type, word) == rank for
+        (rank, word) in enumerate(words)
+    )
+    @test all(
+        Tuple(NineFourths.type_word(sector_type, rank)) == word for
+        (rank, word) in enumerate(words)
+    )
     @test isnothing(NineFourths.type_rank(sector_type, (1, 1, 1, 2)))
 
     sector_type = NineFourths.SectorType((1, 1))
@@ -93,8 +107,9 @@ end
         observed = Dict()
         for ρ in 0:3
             maps = ntuple(3) do leg
-                (emit, index) -> NineFourths.separation_column(emit, sector_type,
-                    leg, ρ, index, t, rootpower)
+                (emit, index) -> NineFourths.separation_column(
+                    emit, sector_type, leg, ρ, index, t, rootpower
+                )
             end
             sector_test_expand!(observed, maps, (x_indices, y_indices, z_indices))
         end
@@ -109,8 +124,9 @@ end
                 expected[((j, 1, x), (i, k, y), (i, l, z))] = t^((j - i)^2)
             end
         end
-        @test Dict(key => NineFourths.rational_result(value) for (key, value) in observed) ==
-            expected
+        @test Dict(
+            key => NineFourths.rational_result(value) for (key, value) in observed
+        ) == expected
     end
 end
 
@@ -143,8 +159,7 @@ end
     dot_copy_two = ((2, 5), (3, 6), (2, 6))
     lengths = (a, b, a + b - 1)
     for leg in 1:3
-        radices = map(local_leg -> local_leg == 1 ? a : 2 * lengths[local_leg],
-                      legs[leg])
+        radices = map(local_leg -> local_leg == 1 ? a : 2 * lengths[local_leg], legs[leg])
         coordinates = ntuple(6) do orientation
             local_leg = legs[leg][orientation]
             local_leg == 1 && return 1
@@ -152,8 +167,9 @@ end
         end
         column = 64 * (sector_test_pack(coordinates, radices) - 1) + 1
         row = 64 * dimensions[leg] * 9 + 1 # Zero-based matrix digits 1 and 2.
-        expected = prod(legs[leg][orientation] == 2 ? inv(t) : t
-                        for orientation in dot_copy_two[leg])
+        expected = prod(
+            legs[leg][orientation] == 2 ? inv(t) : t for orientation in dot_copy_two[leg]
+        )
         leg_map = first_stage.legs[leg]
         @test leg_map[column, row] == expected
         @test iszero(leg_map[column, row + 1])
@@ -195,8 +211,10 @@ end
         @test iszero(leg_map[wrong_column, row])
     end
 
-    transitions = (NineFourths.midpoint_transition(2, 5, 2, 1, 2),
-                   NineFourths.tripling_transition(2, 2, 0, 1, 1))
+    transitions = (
+        NineFourths.midpoint_transition(2, 5, 2, 1, 2),
+        NineFourths.tripling_transition(2, 2, 0, 1, 1),
+    )
     for transition in transitions
         @test transition.sector_type.multiplicity == 2
         @test NineFourths.transition_degree(transition, 1) == 12
@@ -215,8 +233,9 @@ end
     mixed_lengths = (2, 10, 12)
     for leg in 1:3
         input_radices = map(local_leg -> mixed_lengths[local_leg], legs[leg])
-        output_radices = map(lengths -> map(local_leg -> lengths[local_leg], legs[leg]),
-                             (short, long))
+        output_radices = map(
+            lengths -> map(local_leg -> lengths[local_leg], legs[leg]), (short, long)
+        )
         input_coordinates = ntuple(12) do position
             copy, axis = divrem(position - 1, 6)
             orientation = axis + 1
@@ -225,12 +244,16 @@ end
             index = canonical[sector][orientation]
             return local_leg == 1 || sector == 1 ? index : short[local_leg] + index
         end
-        row = input_unit + 4^6 *
+        row =
+            input_unit +
+            4^6 *
             (sector_test_pack(input_coordinates, (input_radices..., input_radices...)) - 1)
-        new_q = sector_test_pack((canonical[1]..., canonical[2]...),
-                                 (output_radices[1]..., output_radices[2]...))
-        column = output_unit + 2^6 * (new_q - 1 + 9 * prod(first(output_radices)) *
-                                                    prod(last(output_radices)))
+        new_q = sector_test_pack(
+            (canonical[1]..., canonical[2]...), (output_radices[1]..., output_radices[2]...)
+        )
+        column =
+            output_unit +
+            2^6 * (new_q - 1 + 9 * prod(first(output_radices)) * prod(last(output_radices)))
         phase, weight = 0, 0
         for orientation in 1:6
             i, ρ = ranks[orientation] - 1, copies[orientation] - 1
@@ -263,8 +286,7 @@ function scalar_midpoint_source_coefficient(columns)
     digits = map(column -> divrem(column - 1, units), columns)
     digits[1][2] == digits[2][2] == digits[3][2] || return 0
     polynomial = map(first, digits)
-    orientations = ((1, 2, 3), (3, 1, 2), (2, 3, 1), (2, 1, 3), (3, 2, 1),
-                    (1, 3, 2))
+    orientations = ((1, 2, 3), (3, 1, 2), (2, 3, 1), (2, 1, 3), (3, 2, 1), (1, 3, 2))
     for _ in 1:2, orientation in orientations
         digits = ntuple(leg -> divrem(polynomial[leg], orientation[leg] == 1 ? 1 : 4), 3)
         polynomial = map(first, digits)
@@ -281,9 +303,8 @@ end
     restriction = NineFourths.transition_restriction(transition, 2, t)
     long_seed_dimension = 81
     changed_matrix_column = 1 + 2^6 * long_seed_dimension * 4
-    for (target_rows, expected) in (((1, 1, 1), 1),
-                                     ((2, 1, 1), 0),
-                                     ((2, 1, changed_matrix_column), t))
+    for (target_rows, expected) in
+        (((1, 1, 1), 1), ((2, 1, 1), 0), ((2, 1, changed_matrix_column), t))
         entries = map(NineFourths.row_entries, restriction.legs, target_rows)
         actual = sum(zip(entries...); init=big(0) // 1) do terms
             source = scalar_midpoint_source_coefficient(map(first, terms))

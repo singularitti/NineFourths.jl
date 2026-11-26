@@ -4,12 +4,12 @@
 | :---------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Build Status**  | [![Build Status](https://github.com/singularitti/NineFourths.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/singularitti/NineFourths.jl/actions/workflows/CI.yml?query=branch%3Amain) [![Build Status](https://ci.appveyor.com/api/projects/status/github/singularitti/NineFourths.jl?svg=true)](https://ci.appveyor.com/project/singularitti/NineFourths-jl)[![Build Status](https://api.cirrus-ci.com/github/singularitti/NineFourths.jl.svg)](https://cirrus-ci.com/github/singularitti/NineFourths.jl) |
 |   **Coverage**    | [![Coverage](https://github.com/singularitti/NineFourths.jl/badges/main/coverage.svg)](https://github.com/singularitti/NineFourths.jl/commits/main) [![Coverage](https://codecov.io/gh/singularitti/NineFourths.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/singularitti/NineFourths.jl)                                                                                                                                                                                                                |
-|    **Others**     | [![Code Style: Blue](https://img.shields.io/badge/code%20style-blue-4495d1.svg)](https://github.com/invenia/BlueStyle) [![License](https://img.shields.io/github/license/singularitti/NineFourths.jl)](https://github.com/singularitti/NineFourths.jl/blob/main/LICENSE)                                                                                                                                                                                                                                                   |
+|    **Others**     | [![Code Style: Blue](https://img.shields.io/badge/code%20style-blue-4495d1.svg)](https://github.com/JuliaDiff/BlueStyle) [![License](https://img.shields.io/github/license/singularitti/NineFourths.jl)](https://github.com/singularitti/NineFourths.jl/blob/main/LICENSE)                                                                                                                                                                                                                                                 |
 
-NineFourths constructs bilinear schemes from OpenAI's upper bound for square
-matrix multiplication and Shpilka's explicit construction. Its executor
-multiplies compatible rectangular matrices over a common scalar field,
-including finite fields and user-defined fields.
+NineFourths implements Amir Shpilka's explicit construction of bilinear schemes
+for square matrix multiplication with target exponents above OpenAI's `9//4`
+upper bound. Its executor multiplies compatible rectangular matrices over a
+common scalar field, including finite fields and user-defined fields.
 
 This repository is created and maintained by
 [@singularitti](https://github.com/singularitti), and contributions are highly welcome.
@@ -42,8 +42,9 @@ term it forms one linear combination of the left blocks and one of the right
 blocks, multiplies them, then weights that product into each output block.
 Scheme coordinates are one-based and follow Julia's column-major order.
 To use coefficient tables of your own, pass them to `BilinearScheme(U, V, W)`.
-The paper scheme stores the finite operations that generate its coefficients.
-Indexing it returns a deferred coefficient.
+The `NineFourths.ShpilkaScheme` returned by `multiplication_scheme` stores the
+operations that generate its coefficients. Indexing it returns a deferred
+`NineFourths.ShpilkaCoefficient`.
 
 ```julia
 import Nemo
@@ -61,7 +62,7 @@ layer. Each recursion level pads the three dimensions independently and uses
 ordinary multiplication at the leaves. If the requested layer exceeds a
 resource limit or an explicit rule has an undefined coefficient in the input
 field, the default raises an exception. `fallback=:classical` permits an
-ordinary product in the same field. In the example, the default paper scheme
+ordinary product in the same field. In the example, the default Shpilka scheme
 exceeds the index limit, so this explicit fallback computes the result.
 
 The executor accepts Julia `AbstractMatrix` containers and Nemo matrices.
@@ -88,26 +89,27 @@ type with identities, or representative field element can supply the domain.
 For the default target, the proof already needs polynomial length
 `a = 2^264` before taking tensor powers. The full target scheme stays symbolic
 on this machine. Its verification checks the construction choices, degree and
-rank budgets, and the exponent inequality. It relies on the paper's lemmas and
+rank budgets, and the exponent inequality. It relies on Shpilka's lemmas and
 the implementation of the corresponding tensor maps.
 
 For explicit tables, `verify_scheme` checks the matrix multiplication identity
 on all input matrix units in their common exact field. A callable field parent
 can also be supplied as `verify_scheme(scheme; field=F)`. The test suite runs
-the paper's executable baseline $Q(1,2)$ through the compiler and `multiply`. It exhaustively checks
-the 64-term rule for a block of side four and compares an exact product with
-Julia's matrix multiplication. A separate check contracts all 64 tensor entries
+Shpilka's baseline $Q(1,2)$ through the compiler and `multiply`. It exhaustively
+checks the 64-term rule for a block of side four and compares an exact product
+with Julia's matrix multiplication. A separate check contracts all 64 tensor entries
 of a size-two midpoint construction, including preparation and return of its
 auxiliary matrix tensor. Finite-field execution selects Fourier orders
 invertible in the input field, performs interpolation with roots of unity, and
 projects temporary cyclotomic expressions back into that field. The suite
-also checks rectangular paper products in small characteristics against
-independent products. Run it with `import Pkg; Pkg.test()` from the active project.
+also checks rectangular products computed with the compiled baseline in small
+characteristics against independent products. Run it with `import Pkg; Pkg.test()`
+from the active project.
 
 | Source | Responsibility |
 | --- | --- |
 | `src/coefficients.jl`, `src/maps.jl` | Exact scalar arithmetic, sparse tensor restrictions and composition |
-| `src/construction/parameters.jl`, `derivation.jl` | Automatic parameter selection and finite derivation |
+| `src/construction/parameters.jl`, `derivation.jl` | Shpilka's parameter choices and finite derivation |
 | `src/construction/polynomial.jl`, `separation.jl`, `sectors.jl` | Polynomial seed, Fourier separation, midpoint and tripling maps |
 | `src/construction/compile.jl` | Interpolation, auxiliary tensor preparation and reuse, and final restriction |
 | `src/schemes.jl`, `src/verification.jl` | Scheme construction, coefficient access and verification reports |
@@ -118,7 +120,7 @@ degeneration maps in §§4–5, and the finite witness and exponent in §6 and
 Theorem 1.2 of Shpilka's exposition. Section 7 gives the field-dependent
 separation and descent argument. [Amir Shpilka, *Exposition of OpenAI’s Matrix Multiplication in Exponent 9/4 (and an explicit algorithm)* (2026)](https://eccc.weizmann.ac.il/report/2026/281/).
 The original upper-bound proof gives the underlying tensor restrictions and
-their conversion to matrix multiplication algorithms. [OpenAI, original upper-bound paper (2026)](https://github.com/openai/math/blob/main/preprints/Matrix-Multiplication-Nine-Fourths-October-2-2026/build/paper.tex).
+their conversion to matrix multiplication algorithms. [OpenAI, *An Upper Bound of 9/4 for the Matrix Multiplication Exponent* (2026)](https://github.com/openai/math/blob/main/preprints/Matrix-Multiplication-Nine-Fourths-October-2-2026/build/paper.tex).
 
 ## Questions and contributions
 

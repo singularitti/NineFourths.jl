@@ -144,13 +144,9 @@ function ordered_sector_indices(sector_type::SectorType, word, coordinates)
 end
 
 function separation_character(leg, i, k, ρ)
-    if leg == 1
-        return (ρ * i, i^2)
-    elseif leg == 2
-        return (ρ * (k - i), 2i * k - i^2)
-    else
-        return (-ρ * k, -2i * k)
-    end
+    leg == 1 && return (ρ * i, i^2)
+    leg == 2 && return (ρ * (k - i), 2i * k - i^2)
+    return (-ρ * k, -2i * k)
 end
 
 function _admissible_separation_order(M, admissible_order)
@@ -174,8 +170,16 @@ If supplied, `rootpower(e)` returns the `e`th power of a primitive
 `dot_index == 1`. The second and third legs take a source coordinate
 `(sector, index)` per tensor factor and drop words outside the fixed type.
 """
-function separation_column(emit, sector_type::SectorType, leg, ρ, coordinates, t,
-                           rootpower=nothing; admissible_order=nothing)
+function separation_column(
+    emit,
+    sector_type::SectorType,
+    leg,
+    ρ,
+    coordinates,
+    t,
+    rootpower=nothing;
+    admissible_order=nothing,
+)
     t = evaluation_parameter(t)
     M = sector_type.multiplicity
     L = _admissible_separation_order(M, admissible_order)

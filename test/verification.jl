@@ -64,7 +64,7 @@ end
     @test occursin("input matrix units", only(report.diagnostics))
 end
 
-@testset "Paper scheme verification" begin
+@testset "Shpilka scheme verification" begin
     scheme = NineFourths.multiplication_scheme()
     report = NineFourths.verify_scheme(scheme)
     @test report.valid
@@ -79,32 +79,44 @@ end
     @test report.exponent <= target
 
     program = scheme.program
-    corrupted_program = NineFourths.PaperProgram(
-        program.steps, program.log_length, program.power, program.copies - 1,
-        program.overhead, program.operations,
+    corrupted_program = NineFourths.ShpilkaProgram(
+        program.steps,
+        program.log_length,
+        program.power,
+        program.copies - 1,
+        program.overhead,
+        program.operations,
     )
-    corrupted = NineFourths.PaperScheme(scheme.derivation, corrupted_program)
+    corrupted = NineFourths.ShpilkaScheme(scheme.derivation, corrupted_program)
     report = NineFourths.verify_scheme(corrupted)
     @test !report.valid
     @test report.identity === :failed
     @test occursin("copy budget", only(report.diagnostics))
 
-    reordered_program = NineFourths.PaperProgram(
-        program.steps, program.log_length, program.power, program.copies,
-        program.overhead, reverse(program.operations),
+    reordered_program = NineFourths.ShpilkaProgram(
+        program.steps,
+        program.log_length,
+        program.power,
+        program.copies,
+        program.overhead,
+        reverse(program.operations),
     )
-    reordered = NineFourths.PaperScheme(scheme.derivation, reordered_program)
+    reordered = NineFourths.ShpilkaScheme(scheme.derivation, reordered_program)
     report = NineFourths.verify_scheme(reordered)
     @test !report.valid
     @test report.identity === :failed
     @test occursin("executable construction", only(report.diagnostics))
 
     altered_seed = (a, b, m) -> NineFourths.seed_decomposition(a, b, m - 1)
-    altered_program = NineFourths.PaperProgram(
-        program.steps, program.log_length, program.power, program.copies,
-        program.overhead, (program.operations[1], program.operations[2], altered_seed),
+    altered_program = NineFourths.ShpilkaProgram(
+        program.steps,
+        program.log_length,
+        program.power,
+        program.copies,
+        program.overhead,
+        (program.operations[1], program.operations[2], altered_seed),
     )
-    altered = NineFourths.PaperScheme(scheme.derivation, altered_program)
+    altered = NineFourths.ShpilkaScheme(scheme.derivation, altered_program)
     report = NineFourths.verify_scheme(altered)
     @test !report.valid
     @test report.identity === :failed

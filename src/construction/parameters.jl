@@ -1,4 +1,4 @@
-const _PAPER_EXPONENT = big(9) // 4
+const _OPENAI_EXPONENT_BOUND = big(9) // 4
 
 # Keep powers that would make a symbolic rule itself expensive in factored form.
 struct ScaledPowerOfTwo
@@ -12,34 +12,37 @@ end
 
 function _scaled_power_of_two(coefficient::BigInt, exponent::BigInt)
     # The cutoff controls storage only. The factored value is also exact.
-    return exponent <= 4096 ? coefficient << Int(exponent) :
-           ScaledPowerOfTwo(coefficient, exponent)
+    return if exponent <= 4096
+        coefficient << Int(exponent)
+    else
+        ScaledPowerOfTwo(coefficient, exponent)
+    end
 end
 
 """
-    ConstructionParameters(target)
+    ShpilkaParameters(target)
 
-Exact parameters in the proof of Theorem 1.2. The target is a finite integer
-or rational above `9//4`. `epsilon` is its gap above `9//4`, capped at one.
+Exact parameters in Shpilka's proof of Theorem 1.2. The target is a finite
+integer or rational above OpenAI's `9//4` bound. `epsilon` is the gap between
+the target and that bound, capped at one.
 `q` is `ceil(16 / epsilon^2)`, `a` is `q * 2^q`,
 `step_bound` bounds the non-baseline derivation entries, and `length_bound`
 bounds their coordinates. The two bounds and the construction coordinates are
 exact, with large powers of two stored in factored form.
 """
-struct ConstructionParameters
+struct ShpilkaParameters
     target::Rational{BigInt}
     epsilon::Rational{BigInt}
     q::BigInt
     a::Union{BigInt,ScaledPowerOfTwo}
     step_bound::BigInt
     length_bound::Union{BigInt,ScaledPowerOfTwo}
-
-    function ConstructionParameters(target::Union{Integer,Rational})
+    function ShpilkaParameters(target::Union{Integer,Rational})
         isfinite(target) || throw(DomainError(target, "the target exponent must be finite"))
         exact_target = Rational{BigInt}(target)
-        exact_target > _PAPER_EXPONENT ||
+        exact_target > _OPENAI_EXPONENT_BOUND ||
             throw(DomainError(target, "the target exponent must be greater than 9/4"))
-        epsilon = min(exact_target - _PAPER_EXPONENT, one(exact_target))
+        epsilon = min(exact_target - _OPENAI_EXPONENT_BOUND, one(exact_target))
         q = ceil(BigInt, 16 / epsilon^2)
         a = _scaled_power_of_two(q, q)
         step_bound = q * (2q^2 + 7q)

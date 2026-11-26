@@ -1,5 +1,3 @@
-import Nemo
-
 const ALGEBRAIC_NUMBERS = Nemo.algebraic_closure(Nemo.QQ)
 const JuliaRational = Union{Integer,Rational}
 
@@ -20,6 +18,7 @@ rational_result(value::JuliaRational) = to_exact(value)
 function rational_result(value::Nemo.QQFieldElem)
     return BigInt(numerator(value)) // BigInt(denominator(value))
 end
+
 to_exact(value::Nemo.QQFieldElem) = rational_result(value)
 
 function rational_result(value::Nemo.QQBarFieldElem)
@@ -107,7 +106,8 @@ function Base.:^(value::PhaseSum, exponent::Integer)
 end
 
 function Base.inv(value::PhaseSum)
-    length(value.terms) == 1 || throw(DomainError(value, "inverting requires a single phase"))
+    length(value.terms) == 1 ||
+        throw(DomainError(value, "inverting requires a single phase"))
     phase, weight = only(value.terms)
     return phase_monomial(-phase, inv(weight))
 end
@@ -126,7 +126,7 @@ end
 function phase_squared_norm(value::PhaseSum, traces)
     return sum(value.terms; init=zero(Rational{BigInt})) do (phase, weight)
         sum(value.terms; init=zero(Rational{BigInt})) do (other_phase, other_weight)
-            weight * other_weight * phase_trace(phase - other_phase, traces)
+            return weight * other_weight * phase_trace(phase - other_phase, traces)
         end
     end
 end
@@ -148,7 +148,7 @@ function rational_result(value::PhaseSum)
     end
     traces = new_phase_traces()
     mean = sum(value.terms; init=zero(Rational{BigInt})) do (phase, weight)
-        weight * phase_trace(phase, traces)
+        return weight * phase_trace(phase, traces)
     end
     # The normalized trace of |value - mean|² is nonnegative and vanishes
     # exactly when value equals the rational number mean.
@@ -161,13 +161,19 @@ end
 # coefficients when FLINT can materialize their cyclotomic representation.
 function as_qqbar(value::PhaseSum)
     return sum(value.terms; init=ALGEBRAIC_NUMBERS(0)) do (phase, weight)
-        root = Nemo.root_of_unity(ALGEBRAIC_NUMBERS, Int(denominator(phase)), Int(numerator(phase)))
+        root = Nemo.root_of_unity(
+            ALGEBRAIC_NUMBERS, Int(denominator(phase)), Int(numerator(phase))
+        )
         return root * weight
     end
 end
 
 function with_qqbar(op, left::PhaseSum, right::Nemo.QQBarFieldElem)
-    return Nemo.is_rational(right) ? op(left, rational_result(right)) : op(as_qqbar(left), right)
+    return if Nemo.is_rational(right)
+        op(left, rational_result(right))
+    else
+        op(as_qqbar(left), right)
+    end
 end
 
 Base.:+(left::PhaseSum, right::Nemo.QQBarFieldElem) = with_qqbar(+, left, right)

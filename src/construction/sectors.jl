@@ -1,5 +1,9 @@
 # Claim 6.6, with all six orientations in the order used by the balanced seed.
 
+# B_X uses the column index, B_Y the row index, and B_Z the
+# contraction index. Their two copies form the two digits of each index.
+const _SECTOR_DOT_LEGS = ((2, 3), (3, 1), (2, 1))
+
 struct SectorTransition{K}
     a::BigInt
     b::BigInt
@@ -13,8 +17,7 @@ function midpoint_transition(a::Integer, b::Integer, s::Integer, j::Integer, N::
     return SectorTransition(big(a), big(b), big(s), SectorType((j, big(N) - j)))
 end
 
-function tripling_transition(a::Integer, b::Integer, j0::Integer, j1::Integer,
-                             j2::Integer)
+function tripling_transition(a::Integer, b::Integer, j0::Integer, j1::Integer, j2::Integer)
     a >= 1 && b >= 1 && big(j0) + j1 + j2 >= 1 ||
         throw(ArgumentError("invalid tripling dimensions or sector counts"))
     return SectorTransition(big(a), big(b), big(0), SectorType((j0, j1, j2)))
@@ -27,7 +30,7 @@ function transition_degree(transition::SectorTransition, stage::Integer)
     M = transition.sector_type.multiplicity
     stage == 1 && return 6 * _sector_copies(transition)
     stage == 2 && return 6 * (M - 1)^2
-    throw(ArgumentError("Claim 6.6 has stages 1 and 2"))
+    return throw(ArgumentError("Claim 6.6 has stages 1 and 2"))
 end
 
 function _sector_input_lengths(transition)
@@ -74,12 +77,8 @@ function _sector_coordinate(transition, local_leg, digit)
         digit <= length && return (sector, digit)
         digit -= length
     end
-    throw(BoundsError())
+    return throw(BoundsError())
 end
-
-# B_X uses the column index, B_Y the row index, and B_Z the
-# contraction index. Their two copies form the two digits of each index.
-const _SECTOR_DOT_LEGS = ((2, 3), (3, 1), (2, 1))
 
 function _sector_dot_axis(leg, orientation)
     shared = findfirst(==(1), LEG_PERMUTATIONS[orientation])
@@ -150,8 +149,9 @@ function _sector_first_leg(transition, leg, t)
                 dot_copy += digit
             end
             target = _sector_coordinate(transition, local_leg, target + 1)
-            value *= _sector_first_value(transition, local_leg, dot_copy, source + 1,
-                                         target, t)
+            value *= _sector_first_value(
+                transition, local_leg, dot_copy, source + 1, target, t
+            )
             iszero(value) && return value
         end
         return value
@@ -176,8 +176,9 @@ function _sector_first_leg(transition, leg, t)
             sources = _sector_first_sources(transition, local_leg, target, digit + 1)
             options = map(sources) do (dot_copy, index)
                 offset = (dot_copy - 1) * dot_stride + (index - 1) * source_stride
-                weight = _sector_first_value(transition, local_leg, dot_copy, index,
-                                             target, t)
+                weight = _sector_first_value(
+                    transition, local_leg, dot_copy, index, target, t
+                )
                 return (offset, weight)
             end
             if length(options) == 1
@@ -199,13 +200,14 @@ function _sector_first_leg(transition, leg, t)
             end
             return (column, weight)
         end
-        return (contribution(bits) for bits in 0:(big(2)^length(alternatives) - 1))
+        return (contribution(bits) for bits in 0:(big(2) ^ length(alternatives) - 1))
     end
     return LegMap(source_dim, target_dim, coefficient, entries)
 end
 
-function _sector_source_coordinates!(input_coordinates, transition, local_leg,
-                                     orientation, word, output_coordinates, offsets)
+function _sector_source_coordinates!(
+    input_coordinates, transition, local_leg, orientation, word, output_coordinates, offsets
+)
     positions = copy(offsets)
     block_offsets = if local_leg == 1
         nothing
@@ -214,8 +216,7 @@ function _sector_source_coordinates!(input_coordinates, transition, local_leg,
     end
     middle_orientation = orientation
     if !_is_midpoint(transition)
-        swapped = map(index -> index == 1 ? 1 : 5 - index,
-                      LEG_PERMUTATIONS[orientation])
+        swapped = map(index -> index == 1 ? 1 : 5 - index, LEG_PERMUTATIONS[orientation])
         middle_orientation = findfirst(==(swapped), LEG_PERMUTATIONS)
     end
     for (copy, sector) in enumerate(word)
@@ -246,10 +247,11 @@ function _sector_second_leg(transition, leg, t, L)
     output_units = M^6
     middle_radices = _sector_middle_radices(transition, leg)
     output_radices = ntuple(length(sector_type.counts)) do sector
-        _sector_output_radices(transition, leg, sector)
+        return _sector_output_radices(transition, leg, sector)
     end
-    output_q = prod(prod(radices)^n for (radices, n) in zip(output_radices,
-                                                          sector_type.counts))
+    output_q = prod(
+        prod(radices)^n for (radices, n) in zip(output_radices, sector_type.counts)
+    )
     source_dim = input_units * prod(middle_radices)^count
     target_dim = output_units * output_q * M^4
     function row_parameters(target_row)
@@ -274,8 +276,15 @@ function _sector_second_leg(transition, leg, t, L)
             word_unit, i = divrem(word_unit, M)
             word = type_word(sector_type, i + 1)
             local_leg = LEG_PERMUTATIONS[orientation][leg]
-            _sector_source_coordinates!(input_coordinates, transition, local_leg,
-                                        orientation, word, output_coordinates, offsets)
+            _sector_source_coordinates!(
+                input_coordinates,
+                transition,
+                local_leg,
+                orientation,
+                word,
+                output_coordinates,
+                offsets,
+            )
             axis = _sector_dot_axis(leg, orientation)
             k = big(0)
             if axis != 0
@@ -287,7 +296,8 @@ function _sector_second_leg(transition, leg, t, L)
         end
         input_q = big(0)
         for copy in Int(count):-1:1, orientation in 6:-1:1
-            input_q = input_q * middle_radices[orientation] +
+            input_q =
+                input_q * middle_radices[orientation] +
                 input_coordinates[orientation, copy] - 1
         end
         return (input_q, phases, weight)
@@ -310,8 +320,12 @@ function _sector_second_leg(transition, leg, t, L)
         input_q, phases, weight = row_parameters(target_row)
         scale = t^weight / L^2
         base_column = input_q * input_units + 1
-        return ((base_column + sum(digits[i] * copy_strides[i] for i in 1:6),
-                 phase_coefficient(digits, phases, scale)) for digits in active_digits)
+        return (
+            (
+                base_column + sum(digits[i] * copy_strides[i] for i in 1:6),
+                phase_coefficient(digits, phases, scale),
+            ) for digits in active_digits
+        )
     end
     return LegMap(source_dim, target_dim, coefficient, entries)
 end
@@ -329,11 +343,11 @@ The second stage uses Fourier order `2M` or `2M-1` and keeps the physical
 unit coordinates in radix `2M`. For the smaller order, the extra digit is
 discarded in each orientation as in §7.
 """
-function transition_restriction(transition::SectorTransition, stage::Integer, t;
-                                admissible_order=nothing)
+function transition_restriction(
+    transition::SectorTransition, stage::Integer, t; admissible_order=nothing
+)
     t = evaluation_parameter(t)
-    L = _admissible_separation_order(transition.sector_type.multiplicity,
-                                    admissible_order)
+    L = _admissible_separation_order(transition.sector_type.multiplicity, admissible_order)
     legs = if stage == 1
         ntuple(leg -> _sector_first_leg(transition, leg, t), 3)
     elseif stage == 2

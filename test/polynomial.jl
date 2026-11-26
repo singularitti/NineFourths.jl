@@ -18,7 +18,9 @@
     @test large_root^(large_order ÷ 2) == -1
     @test NineFourths.rational_result(1 + third_root + third_root^2) == 0
     @test iszero(large_root + large_root * third_root + large_root * third_root^2)
-    @test NineFourths.rational_result(1 + large_root + large_root * third_root + large_root * third_root^2) == 1
+    @test NineFourths.rational_result(
+        1 + large_root + large_root * third_root + large_root * third_root^2
+    ) == 1
 
     rational = big(2)//3
     algebraic = NineFourths.ALGEBRAIC_NUMBERS(big(1)//3)
@@ -45,7 +47,7 @@ end
     large_length = big(2)^128
     large = NineFourths.polynomial_decomposition(1, large_length)
     @test NineFourths.rank_coefficient(large, 2, 3, 2) ==
-          NineFourths.root_of_unity(large_length, -1) / large_length
+        NineFourths.root_of_unity(large_length, -1) / large_length
 end
 
 function seed_tensor_entry(a, b, coordinates)
@@ -66,7 +68,9 @@ end
     @test NineFourths.rank_count(seed) == 2^6
     for coordinates in ((1, 1, 1), (16, 16, 16), (1, 2, 3), (3, 13, 9), (4, 7, 8))
         coefficient = sum(1:NineFourths.rank_count(seed)) do term
-            prod(leg -> NineFourths.rank_coefficient(seed, term, leg, coordinates[leg]), 1:3)
+            prod(
+                leg -> NineFourths.rank_coefficient(seed, term, leg, coordinates[leg]), 1:3
+            )
         end
         @test coefficient == seed_tensor_entry(1, 2, coordinates)
     end
@@ -78,8 +82,9 @@ end
     first_coordinate, second_coordinate = 1, 2
     term = first_term + 64 * (second_term - 1)
     coordinate = first_coordinate + 16 * (second_coordinate - 1)
-    expected = NineFourths.rank_coefficient(seed, first_term, 1, first_coordinate) *
-               NineFourths.rank_coefficient(seed, second_term, 1, second_coordinate)
+    expected =
+        NineFourths.rank_coefficient(seed, first_term, 1, first_coordinate) *
+        NineFourths.rank_coefficient(seed, second_term, 1, second_coordinate)
     @test expected == -1//16
     @test NineFourths.rank_coefficient(power, term, 1, coordinate) == expected
 end
@@ -104,7 +109,10 @@ end
         unit = NineFourths.seed_unit(a, b)
         @test NineFourths.target_dims(unit) == (2, 2, 2)
         for k in 1:2, j in 1:2, i in 1:2
-            source = ntuple(leg -> first(only(NineFourths.row_entries(unit.legs[leg], (i, j, k)[leg]))), 3)
+            source = ntuple(
+                leg -> first(only(NineFourths.row_entries(unit.legs[leg], (i, j, k)[leg]))),
+                3,
+            )
             @test seed_tensor_entry(a, b, source) == (i == j == k)
         end
     end

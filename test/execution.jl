@@ -56,18 +56,23 @@
         @test error.input_size == 3
         @test error.block_side == 2
         @test NineFourths.multiply(A, B, strassen; max_coefficient_visits=672) == expected
-        @test NineFourths.multiply(A, B, strassen; max_coefficient_visits=671,
-                                  fallback=:classical) == expected
+        @test NineFourths.multiply(
+            A, B, strassen; max_coefficient_visits=671, fallback=:classical
+        ) == expected
 
-        @test_throws NineFourths.ExecutionInfeasible NineFourths.multiply(A, B, strassen;
-                                                                         max_workspace_entries=28)
-        @test NineFourths.multiply(A, B, strassen; max_workspace_entries=28,
-                                  fallback=:classical) == expected
+        @test_throws NineFourths.ExecutionInfeasible NineFourths.multiply(
+            A, B, strassen; max_workspace_entries=28
+        )
+        @test NineFourths.multiply(
+            A, B, strassen; max_workspace_entries=28, fallback=:classical
+        ) == expected
 
-        paper = NineFourths.multiplication_scheme()
-        @test_throws NineFourths.ExecutionInfeasible NineFourths.multiply(A, B, paper)
-        @test_throws "exceeding the largest addressable side" NineFourths.multiply(A, B, paper)
-        @test NineFourths.multiply(A, B, paper; fallback=:classical) == expected
+        shpilka = NineFourths.multiplication_scheme()
+        @test_throws NineFourths.ExecutionInfeasible NineFourths.multiply(A, B, shpilka)
+        @test_throws "exceeding the largest addressable side" NineFourths.multiply(
+            A, B, shpilka
+        )
+        @test NineFourths.multiply(A, B, shpilka; fallback=:classical) == expected
 
         empty = Matrix{Rational{Int}}(undef, 0, 0)
         @test NineFourths.multiply(empty, empty, strassen) == empty
@@ -75,14 +80,18 @@
         @test size(C) == (0, 0)
         @test C isa Matrix{Rational{BigInt}}
 
-        @test_throws DimensionMismatch NineFourths.multiply(A, B[1:2, 1:2], strassen;
-                                                            fallback=:classical)
-        @test_throws DimensionMismatch NineFourths.multiply(A[:, 1:2], B[:, 1:2], strassen;
-                                                            fallback=:classical)
-        @test NineFourths.multiply(Float64.(A), B, strassen;
-                                   fallback=:classical, max_coefficient_visits=0) == Float64.(expected)
-        @test_throws DomainError NineFourths.multiply([1//0;;], [1;;], strassen;
-                                                      fallback=:classical, max_coefficient_visits=0)
+        @test_throws DimensionMismatch NineFourths.multiply(
+            A, B[1:2, 1:2], strassen; fallback=:classical
+        )
+        @test_throws DimensionMismatch NineFourths.multiply(
+            A[:, 1:2], B[:, 1:2], strassen; fallback=:classical
+        )
+        @test NineFourths.multiply(
+            Float64.(A), B, strassen; fallback=:classical, max_coefficient_visits=0
+        ) == Float64.(expected)
+        @test_throws DomainError NineFourths.multiply(
+            [1//0;;], [1;;], strassen; fallback=:classical, max_coefficient_visits=0
+        )
         @test_throws ArgumentError NineFourths.multiply(A, B, strassen; fallback=:unknown)
     end
 end

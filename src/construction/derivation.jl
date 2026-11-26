@@ -1,5 +1,5 @@
 """
-    PaperDerivation(parameters::ConstructionParameters)
+    ShpilkaDerivation(parameters::ShpilkaParameters)
 
 Compact description of the derivation in Theorem 1.2 of Shpilka's
 *Exposition of OpenAI’s Matrix Multiplication in Exponent 9/4
@@ -7,8 +7,8 @@ Compact description of the derivation in Theorem 1.2 of Shpilka's
 It starts with the baseline at `(q, q)` and applies Lemma 6.5 at step lengths
 `1, 2, 4, …, 2^(q-1)`.
 """
-struct PaperDerivation
-    parameters::ConstructionParameters
+struct ShpilkaDerivation
+    parameters::ShpilkaParameters
 end
 
 """
@@ -38,7 +38,6 @@ function _extend_row!(nodes, start, distance, depth)
     tripled = _push_derivation_node!(nodes, a, 3b + a - 1, 3value, :tripling, (start,))
     upper_column = 3b + a
     upper = _push_derivation_node!(nodes, a, upper_column, 3value, :restriction, (tripled,))
-
     chain = Tuple{BigInt,Int}[]
     column = b + distance
     while depth > 0 && b < column < upper_column
@@ -47,7 +46,6 @@ function _extend_row!(nodes, start, distance, depth)
         column = 2column - nodes[endpoint].b
         depth -= 1
     end
-
     index = if column == b
         start
     elseif column == upper_column
@@ -55,7 +53,6 @@ function _extend_row!(nodes, start, distance, depth)
     else
         _push_derivation_node!(nodes, a, column, value, :restriction, (start,))
     end
-
     for (column, endpoint) in Iterators.reverse(chain)
         predecessors = endpoint == start ? (endpoint, index) : (index, endpoint)
         midpoint = (nodes[endpoint].value + nodes[index].value) / 2
@@ -65,13 +62,13 @@ function _extend_row!(nodes, start, distance, depth)
 end
 
 """
-    materialize_derivation(derivation::PaperDerivation) -> Vector{DerivationNode}
+    materialize_derivation(derivation::ShpilkaDerivation) -> Vector{DerivationNode}
 
 Generate the proof entries in dependency order with exact dyadic values. This
 enumerates the full derivation, including intermediate entries of the row
 extensions. For targets close to `9//4` it can require substantial resources.
 """
-function materialize_derivation(derivation::PaperDerivation)
+function materialize_derivation(derivation::ShpilkaDerivation)
     q = derivation.parameters.q
     nodes = [DerivationNode(q, q, q // 1, :baseline, ())]
     index = 1
@@ -81,7 +78,9 @@ function materialize_derivation(derivation::PaperDerivation)
         for _ in 1:q
             index = _extend_row!(nodes, index, distance, q)
             moved = nodes[index]
-            index = _push_derivation_node!(nodes, moved.b, moved.a, moved.value, :symmetry, (index,))
+            index = _push_derivation_node!(
+                nodes, moved.b, moved.a, moved.value, :symmetry, (index,)
+            )
             index = _extend_row!(nodes, index, distance, q)
         end
         distance *= 2

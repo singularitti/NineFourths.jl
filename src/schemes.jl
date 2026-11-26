@@ -8,14 +8,15 @@ struct ExplicitScheme{A,B,C} <: BilinearScheme
     W::C
 end
 
-"""Construct a scheme from three column-major coefficient tables (block coordinates × terms)."""
+"""Construct a scheme from three column-major tables (block coordinates × terms)."""
 function explicit_scheme(U::AbstractMatrix, V::AbstractMatrix, W::AbstractMatrix)
     Base.require_one_based_indexing(U, V, W)
     size(U) == size(V) == size(W) ||
         throw(DimensionMismatch("the three coefficient tables must have the same size"))
     rows, rank = size(U)
     u = isqrt(rows)
-    u > 0 && u^2 == rows && rank > 0 || throw(DimensionMismatch("expected u² rows and at least one column"))
+    u > 0 && u^2 == rows && rank > 0 ||
+        throw(DimensionMismatch("expected u² rows and at least one column"))
     return ExplicitScheme(u, U, V, W)
 end
 
@@ -27,10 +28,12 @@ per product. Each column describes a left linear form, a right linear form
 and the weights of the product in the output. Coefficients may be elements
 of the same field as the input matrices.
 """
-BilinearScheme(U::AbstractMatrix, V::AbstractMatrix, W::AbstractMatrix) =
-    explicit_scheme(U, V, W)
+function BilinearScheme(U::AbstractMatrix, V::AbstractMatrix, W::AbstractMatrix)
+    return explicit_scheme(U, V, W)
+end
 
-struct PaperProgram{Ops<:Tuple}
+"""Operations and size bounds for Shpilka's finite construction (§6)."""
+struct ShpilkaProgram{Ops<:Tuple}
     steps::BigInt
     log_length::BigInt
     power::BigInt
@@ -39,54 +42,72 @@ struct PaperProgram{Ops<:Tuple}
     operations::Ops
 end
 
-struct PaperScheme{P<:PaperProgram} <: BilinearScheme
-    derivation::PaperDerivation
+"""A bilinear scheme represented by Shpilka's derivation and its substitution program."""
+struct ShpilkaScheme{P<:ShpilkaProgram} <: BilinearScheme
+    derivation::ShpilkaDerivation
     program::P
 end
 
 """
-    multiplication_scheme(target_exponent = 5//2) -> BilinearScheme
+    multiplication_scheme(target_exponent=5//2) -> BilinearScheme
 
 Construct Shpilka's exact bilinear algorithm for the given rational upper bound
-on the matrix multiplication exponent. The target must exceed `9//4`.
+on the matrix multiplication exponent. The target must exceed OpenAI's bound
+of `9//4`.
 The finite substitution program retains tensor powers and derivation loops
 without expanding their coefficient tables. It can be reused for many inputs.
 
 `verify_scheme` audits the construction parameters and arithmetic exponent.
 `multiply(A, B, scheme)` requests execution. `scheme[term, leg, coordinate]`
 indexes a coefficient (legs 1 and 2 are the left and right input forms, leg 3
-is the output weight). Paper coefficients print as unevaluated contractions.
+is the output weight). Coefficients of a Shpilka scheme print as unevaluated
+contractions.
 """
 function multiplication_scheme(target_exponent::Union{Integer,Rational}=5//2)
-    parameters = ConstructionParameters(target_exponent)
-    derivation = PaperDerivation(parameters)
+    parameters = ShpilkaParameters(target_exponent)
+    derivation = ShpilkaDerivation(parameters)
     S = parameters.step_bound
     log_length = parameters.q + 2 + ndigits(parameters.q - 1; base=2)
     overhead = 34
     N = 8 * overhead * S * log_length + 64 * S^2
-    program = PaperProgram(S, log_length, N, _witness_copies(S, N), overhead,
-                           (materialize_derivation, compile_witness, seed_decomposition))
-    return PaperScheme(derivation, program)
+    program = ShpilkaProgram(
+        S,
+        log_length,
+        N,
+        _witness_copies(S, N),
+        overhead,
+        (materialize_derivation, compile_witness, seed_decomposition),
+    )
+    return ShpilkaScheme(derivation, program)
 end
 
 # The side is r^(N²) from Lemma 6.7. Even its bit length can exceed all
 # addressable memory. Keep the executable definition, not a floating estimate.
-struct WitnessSide{S<:PaperScheme}
+struct WitnessSide{S<:ShpilkaScheme}
     scheme::S
 end
-block_side(s::PaperScheme) = WitnessSide(s)
+
+block_side(s::ShpilkaScheme) = WitnessSide(s)
 block_side(s::ExplicitScheme) = s.u
 
 function Base.show(io::IO, s::WitnessSide)
-    print(io, "r^(N²) from Lemma 6.7 (q=", s.scheme.derivation.parameters.q,
-          ", N=", s.scheme.program.power, ")")
+    return print(
+        io,
+        "r^(N²) from Lemma 6.7 (q=",
+        s.scheme.derivation.parameters.q,
+        ", N=",
+        s.scheme.program.power,
+        ")",
+    )
 end
-function Base.show(io::IO, s::PaperScheme)
-    print(io, "multiplication_scheme(", s.derivation.parameters.target, ")")
+
+function Base.show(io::IO, s::ShpilkaScheme)
+    return print(io, "multiplication_scheme(", s.derivation.parameters.target, ")")
 end
-function Base.show(io::IO, ::MIME"text/plain", s::PaperScheme)
+
+function Base.show(io::IO, ::MIME"text/plain", s::ShpilkaScheme)
     show(io, s)
-    print(io, "\n  Base block side ", block_side(s))
+    return print(io, "\n  Base block side ", block_side(s))
 end
 
 function execution_dimensions(s::ExplicitScheme, maxside, maxrank)
@@ -113,7 +134,7 @@ function _bounded_power(base::Integer, exponent::Integer, limit::Integer)
     return answer
 end
 
-function execution_dimensions(s::PaperScheme, maxside, maxrank)
+function execution_dimensions(s::ShpilkaScheme, maxside, maxrank)
     # The seed has (2a-1)^(6m) indexed products. Its matrix side also
     # satisfies log2(u) >= 2mq by Theorem 1.2's proof (q >= 16).
     p, m = s.derivation.parameters, s.program.copies
@@ -131,7 +152,9 @@ end
 _materialize_length(x::BigInt) = x
 _materialize_length(x::ScaledPowerOfTwo) = x.coefficient * big(2)^x.exponent
 
-function scheme_coefficient(s::ExplicitScheme, term::Integer, leg::Integer, coordinate::Integer)
+function scheme_coefficient(
+    s::ExplicitScheme, term::Integer, leg::Integer, coordinate::Integer
+)
     table = (s.U, s.V, s.W)[leg]
     return table[coordinate, term]
 end
@@ -144,17 +167,21 @@ struct LoweredScheme <: BilinearScheme
             throw(DimensionMismatch("seed and witness differ"))
         target_dims(witness.restriction) == mm_dims(witness.side) ||
             throw(DimensionMismatch("witness has wrong target"))
-        new(seed, witness)
+        return new(seed, witness)
     end
 end
+
 block_side(s::LoweredScheme) = s.witness.side
+
 function execution_dimensions(s::LoweredScheme, maxside, maxrank)
     u, r = block_side(s), rank_count(s.seed)
     return u <= maxside && r <= maxrank ? (Int(u), Int(r)) : nothing
 end
 
 """Contract one target row of an exact restriction with one rank-one seed term."""
-function scheme_coefficient(s::LoweredScheme, term::Integer, leg::Integer, coordinate::Integer)
+function scheme_coefficient(
+    s::LoweredScheme, term::Integer, leg::Integer, coordinate::Integer
+)
     1 <= term <= rank_count(s.seed) || throw(BoundsError(s, term))
     row = s.witness.restriction.legs[leg]
     total = big(0)//1
@@ -164,30 +191,39 @@ function scheme_coefficient(s::LoweredScheme, term::Integer, leg::Integer, coord
     return total
 end
 
-function lower_scheme(s::PaperScheme; admissible_order=nothing)
+function lower_scheme(s::ShpilkaScheme; admissible_order=nothing)
     build, compile, decompose = s.program.operations
-    witness = compile(build(s.derivation), s.program.power; step_bound=s.program.steps,
-                      admissible_order)
+    witness = compile(
+        build(s.derivation), s.program.power; step_bound=s.program.steps, admissible_order
+    )
     a = _materialize_length(s.derivation.parameters.a)
     return LoweredScheme(decompose(a, a, witness.copies; admissible_order), witness)
 end
 
-struct PaperCoefficient{S<:PaperScheme}
+"""A coefficient of Shpilka's scheme whose restriction and seed contraction are deferred."""
+struct ShpilkaCoefficient{S<:ShpilkaScheme}
     scheme::S
     term::BigInt
     leg::Int
     coordinate::BigInt
 end
 
-function Base.show(io::IO, c::PaperCoefficient)
-    print(io, "row ", c.coordinate, " of restriction leg ", c.leg,
-          " applied to polynomial seed term ", c.term)
+function Base.show(io::IO, c::ShpilkaCoefficient)
+    return print(
+        io,
+        "row ",
+        c.coordinate,
+        " of restriction leg ",
+        c.leg,
+        " applied to polynomial seed term ",
+        c.term,
+    )
 end
 
 # For ordinary index queries the proven lower bounds settle membership
 # immediately. Only an index with an exceptionally long representation
 # requires evaluating the corresponding exact upper endpoint.
-function _check_paper_index(s::PaperScheme, term, leg, coordinate)
+function _check_shpilka_index(s::ShpilkaScheme, term, leg, coordinate)
     1 <= leg <= 3 || throw(BoundsError(1:3, leg))
     term >= 1 && coordinate >= 1 || throw(BoundsError(s, (term, leg, coordinate)))
     p, m = s.derivation.parameters, s.program.copies
@@ -197,37 +233,55 @@ function _check_paper_index(s::PaperScheme, term, leg, coordinate)
     end
     if ndigits(coordinate; base=2) > 4 * m * p.q
         u = witness_side(s.program.operations[1](s.derivation), s.program.power)
-        coordinate <= u^2 || throw(BoundsError(s, coordinate))
+        return coordinate <= u^2 || throw(BoundsError(s, coordinate))
     end
+    return nothing
 end
-function scheme_coefficient(s::PaperScheme, term::Integer, leg::Integer, coordinate::Integer)
-    _check_paper_index(s, term, leg, coordinate)
-    return PaperCoefficient(s, big(term), Int(leg), big(coordinate))
+
+function scheme_coefficient(
+    s::ShpilkaScheme, term::Integer, leg::Integer, coordinate::Integer
+)
+    _check_shpilka_index(s, term, leg, coordinate)
+    return ShpilkaCoefficient(s, big(term), Int(leg), big(coordinate))
 end
-Base.getindex(s::BilinearScheme, term::Integer, leg::Integer, coordinate::Integer) =
-    scheme_coefficient(s, term, leg, coordinate)
+
+function Base.getindex(s::BilinearScheme, term::Integer, leg::Integer, coordinate::Integer)
+    return scheme_coefficient(s, term, leg, coordinate)
+end
 
 """
     materialize(coefficient; max_leg_bits)
 
-Evaluate a deferred coefficient by composing the paper's exact restriction
-and contracting the requested row. The explicit budget limits the permitted
-bit length of a source-leg dimension; full paper instances are enormous.
+Evaluate a deferred coefficient by composing the exact restriction in Shpilka's
+construction and contracting the requested row. The budget limits the bit
+length of a source-leg dimension, which can be large even at the default target.
 """
-function materialize(c::PaperCoefficient; max_leg_bits::Integer)
+function materialize(c::ShpilkaCoefficient; max_leg_bits::Integer)
     s = c.scheme
     max_leg_bits >= 1 || throw(DomainError(max_leg_bits))
     p = s.derivation.parameters
     # Each of the three polynomial factors is at least 2^q. Check before
     # attempting to allocate either the seed dimensions or any proof nodes.
     lower = 6 * s.program.copies * p.q + 1
-    lower <= max_leg_bits ||
-        throw(ArgumentError("a source-leg dimension needs at least $lower bits, exceeding the requested budget of $max_leg_bits"))
-    lower <= typemax(Int) ||
-        throw(ArgumentError("a source-leg dimension needs at least $lower bits, beyond addressable bit lengths on this runtime"))
+    lower <= max_leg_bits || throw(
+        ArgumentError(
+            "a source-leg dimension needs at least $lower bits, " *
+            "exceeding the requested budget of $max_leg_bits",
+        ),
+    )
+    lower <= typemax(Int) || throw(
+        ArgumentError(
+            "a source-leg dimension needs at least $lower bits, " *
+            "beyond addressable bit lengths on this runtime",
+        ),
+    )
     # log2(seed_dim) = 2m log2(a²(2a-1)); use an upper bound without expanding a.
     upper = 2 * s.program.copies * (3 * (p.q + ndigits(p.q; base=2)) + 1) + 1
-    upper <= max_leg_bits ||
-        throw(ArgumentError("the source-leg dimension could exceed the requested budget (upper bound $upper bits)"))
+    upper <= max_leg_bits || throw(
+        ArgumentError(
+            "the source-leg dimension could exceed the requested budget " *
+            "(upper bound $upper bits)",
+        ),
+    )
     return scheme_coefficient(lower_scheme(s), c.term, c.leg, c.coordinate)
 end

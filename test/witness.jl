@@ -1,6 +1,7 @@
 @testset "Catalytic witness compilation" begin
-    node(a, b, value, kind, parents=()) =
-        NineFourths.DerivationNode(big(a), big(b), big(value) // 1, kind, parents)
+    function node(a, b, value, kind, parents=())
+        return NineFourths.DerivationNode(big(a), big(b), big(value) // 1, kind, parents)
+    end
 
     baseline = [node(1, 2, 2, :baseline)]
     witness = NineFourths.compile_witness(baseline, 1)
@@ -9,8 +10,9 @@
     @test NineFourths.source_dims(witness.restriction) == NineFourths.seed_dims(1, 2)
     @test NineFourths.target_dims(witness.restriction) == NineFourths.mm_dims(4)
 
-    midpoint = [node(1, 1, 1, :baseline), node(1, 3, 3, :baseline),
-                node(1, 2, 2, :midpoint, (1, 2))]
+    midpoint = [
+        node(1, 1, 1, :baseline), node(1, 3, 3, :baseline), node(1, 2, 2, :midpoint, (1, 2))
+    ]
     plan = NineFourths._witness_events(midpoint, 2)
     event = only(plan.events)
     @test event.counts == (0, 2, 0)
@@ -22,11 +24,15 @@
     @test witness.side == 625
     @test witness.copies == 416
     @test NineFourths.source_dims(witness.restriction) ==
-          map(dimension -> dimension^witness.copies, NineFourths.seed_dims(1, 2))
+        map(dimension -> dimension^witness.copies, NineFourths.seed_dims(1, 2))
     @test NineFourths.target_dims(witness.restriction) == NineFourths.mm_dims(625)
 
-    chain = [node(1, 2, 2, :baseline), node(1, 6, 6, :tripling, (1,)),
-             node(6, 1, 6, :symmetry, (2,)), node(7, 1, 6, :restriction, (3,))]
+    chain = [
+        node(1, 2, 2, :baseline),
+        node(1, 6, 6, :tripling, (1,)),
+        node(6, 1, 6, :symmetry, (2,)),
+        node(7, 1, 6, :restriction, (3,)),
+    ]
     plan = NineFourths._witness_events(chain, 2)
     tripling = last(plan.events)
     @test tripling.counts == (1, 1, 0)
@@ -34,8 +40,12 @@
     @test tripling.side == 64
     @test NineFourths.compile_witness(chain, 2).side == 64^4
 
-    fallback = [node(1, 1, 1, :baseline), node(1, 3, 1, :restriction, (1,)),
-                node(1, 2, 1, :midpoint, (1, 2)), node(1, 6, 3, :tripling, (3,))]
+    fallback = [
+        node(1, 1, 1, :baseline),
+        node(1, 3, 1, :restriction, (1,)),
+        node(1, 2, 1, :midpoint, (1, 2)),
+        node(1, 6, 3, :tripling, (3,)),
+    ]
     @test NineFourths.compile_witness(fallback, 1).side == 1
 
     transition = NineFourths.tripling_transition(1, 1, 1, 1, 0)
@@ -92,7 +102,7 @@ end
         column = point + phase.points * (old - 1)
         sign = isodd(point) ? 1 : -1
         @test phase.restriction.legs[1][row, column] ==
-              -sign * binomial(phase.points, point) // point
+            -sign * binomial(phase.points, point) // point
     end
 
     # Interpolation gives the constant term across all powers up through D.
@@ -100,19 +110,24 @@ end
     phase = NineFourths._interpolated_phase(transition, 1, 2)
     weights = [phase.restriction.legs[1][1, point] for point in 1:phase.points]
     @test sum(weights) == 1
-    @test all(iszero(sum(weights[point] * point^degree for point in 1:phase.points))
-              for degree in 1:(phase.points - 1))
+    @test all(
+        iszero(sum(weights[point] * point^degree for point in 1:phase.points)) for
+        degree in 1:(phase.points - 1)
+    )
 end
 
 # In Q(1,2), the two nonscalar legs of each orientation carry the same
 # binary index. Grouping these digits by the scalar leg gives the two
 # matrix indices on each source leg, even across powered copies of Q.
-function midpoint_test_source_pairs(witness, leg, row; embed=identity, zero_weight=big(0) // 1)
+function midpoint_test_source_pairs(
+    witness, leg, row; embed=identity, zero_weight=big(0) // 1
+)
     orientations = ((1, 2, 3), (3, 1, 2), (2, 3, 1), (2, 1, 3), (3, 2, 1), (1, 3, 2))
     active = filter(orientation -> orientation[leg] != 1, orientations)
     shared_legs = ((2, 3), (3, 1), (2, 1))[leg]
-    positions = map(shared -> findall(orientation -> orientation[shared] == 1, active),
-                    shared_legs)
+    positions = map(
+        shared -> findall(orientation -> orientation[shared] == 1, active), shared_legs
+    )
     function axis_index(source, digits)
         index, place = big(0), big(1)
         for _ in 1:witness.copies
@@ -135,7 +150,9 @@ end
 function test_midpoint_tensor_identity(witness; embed=identity, zero_weight=big(0) // 1)
     Weight = typeof(zero_weight)
     rows = ntuple(3) do leg
-        [midpoint_test_source_pairs(witness, leg, row; embed, zero_weight) for row in 1:4]
+        return [
+            midpoint_test_source_pairs(witness, leg, row; embed, zero_weight) for row in 1:4
+        ]
     end
     right_buckets = map(rows[2]) do right
         by_inner = Dict{BigInt,Vector{Tuple{BigInt,Weight}}}()
@@ -144,7 +161,6 @@ function test_midpoint_tensor_identity(witness; embed=identity, zero_weight=big(
         end
         return by_inner
     end
-
     matrix_units = CartesianIndices((2, 2))
     for y in 1:4, x in 1:4
         by_inner = right_buckets[y]
@@ -153,7 +169,8 @@ function test_midpoint_tensor_identity(witness; embed=identity, zero_weight=big(
             haskey(by_inner, inner) || continue
             for (column, right_weight) in by_inner[inner]
                 coordinate = (row, column)
-                product[coordinate] = get(product, coordinate, zero_weight) + weight * right_weight
+                product[coordinate] =
+                    get(product, coordinate, zero_weight) + weight * right_weight
             end
         end
         i, left_inner = Tuple(matrix_units[x])
@@ -166,12 +183,15 @@ function test_midpoint_tensor_identity(witness; embed=identity, zero_weight=big(
             @test coefficient == embed(Int(expected))
         end
     end
+    return nothing
 end
 
 @testset "Compiled midpoint tensor identity" begin
-    nodes = [NineFourths.DerivationNode(1, 1, 1 // 1, :baseline, ()),
-             NineFourths.DerivationNode(1, 3, 3 // 1, :baseline, ()),
-             NineFourths.DerivationNode(1, 2, 2 // 1, :midpoint, (1, 2))]
+    nodes = [
+        NineFourths.DerivationNode(1, 1, 1 // 1, :baseline, ()),
+        NineFourths.DerivationNode(1, 3, 3 // 1, :baseline, ()),
+        NineFourths.DerivationNode(1, 2, 2 // 1, :midpoint, (1, 2)),
+    ]
     # This step prepares and returns M₄ and crops the long child's M₉
     # to M₂ ⊗ M₄ before discarding the returned catalyst.
     witness = NineFourths.compile_witness(nodes, 1)
